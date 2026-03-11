@@ -57,6 +57,9 @@ messages = {
 # Track modem SMS indices for deletion
 sms_modem_indices = {}  # Map of message index to modem message ID
 
+# Track SMS parts for concatenation
+sms_parts = {}  # Map of (phone, timestamp) to list of parts
+
 # GSM Modem setup
 modem = None
 modem_port = '/dev/ttyUSB0'
@@ -132,7 +135,7 @@ def init_modem():
 
 def read_sms_from_sim():
     """Read SMS from SIM card storage"""
-    global modem, processed_messages, sms_modem_indices
+    global modem, processed_messages, sms_modem_indices, sms_parts
     
     try:
         if modem is None or not modem_connected:
@@ -154,7 +157,6 @@ def read_sms_from_sim():
             # Parse messages
             lines = response_str.split('\r\n')
             i = 0
-            found_new = False
             
             while i < len(lines):
                 line = lines[i]
@@ -164,13 +166,15 @@ def read_sms_from_sim():
                         # Format: +CMGL: <id>,<stat>,"<oa/da>","<alpha>",<scts>[,<tooa>,<length>]
                         log_message(f"[RECEIVER] Parsing line: {line}")
                         
-                        # Extract message ID and phone number
+                        # Extract message ID, phone number, and timestamp
                         parts = line.split(',')
                         
-                        if len(parts) >= 3:
+                        if len(parts) >= 5:
                             msg_id = parts[0].split(':')[1].strip()
                             stat = parts[1].strip()
                             phone = parts[2].strip().strip('"')
+                            # Reconstruct timestamp
+                            timestamp_part = parts[4].strip().strip('"')
                             
                             # Skip if we've already processed this message
                             if msg_id in processed_messages:
@@ -186,28 +190,63 @@ def read_sms_from_sim():
                                 decoded_text = try_decode_hex(message_text)
                                 
                                 if decoded_text:
-                                    # Store message
-                                    message = {
-                                        'type': 'received',
-                                        'phone': phone,
-                                        'message': decoded_text,
-                                        'timestamp': datetime.now().isoformat(),
-                                        'status': 'received'
-                                    }
+                                    # Create a key for grouping multi-part messages
+                                    msg_key = (phone, timestamp_part)
                                     
-                                    msg_index = len(messages['received'])
-                                    messages['received'].append(message)
-                                    sms_modem_indices[msg_index] = msg_id  # Store modem ID for deletion
+                                    # Store this part
+                                    if msg_key not in sms_parts:
+                                        sms_parts[msg_key] = []
+                                    
+                                    sms_parts[msg_key].append({
+                                        'id': msg_id,
+                                        'text': decoded_text,
+                                        'order': len(sms_parts[msg_key])
+                                    })
+                                    
                                     processed_messages.add(msg_id)
-                                    log_message(f"[RECEIVER] ✓ NEW SMS from {phone}: {decoded_text[:50]}")
-                                    found_new = True
+                                    log_message(f"[RECEIVER] Part {len(sms_parts[msg_key])} from {phone}: {decoded_text[:30]}...")
                     except Exception as e:
                         log_message(f"[RECEIVER] Error parsing line '{line}': {str(e)}")
                 
                 i += 1
             
-            if not found_new:
-                log_message(f"[RECEIVER] No new unread SMS found")
+            # Now combine multi-part messages and store them
+            for msg_key, parts_list in list(sms_parts.items()):
+                # Sort parts by order
+                parts_list.sort(key=lambda x: x['order'])
+                
+                # Check if we have all parts (this is a heuristic - we assume a message is complete after no new parts)
+                # For now, just combine what we have
+                combined_text = ''.join([p['text'] for p in parts_list])
+                phone, timestamp_part = msg_key
+                
+                # Check if we already have this combined message
+                already_stored = any(
+                    m['phone'] == phone and m['message'] == combined_text 
+                    for m in messages['received']
+                )
+                
+                if not already_stored and combined_text:
+                    # Store combined message
+                    message = {
+                        'type': 'received',
+                        'phone': phone,
+                        'message': combined_text,
+                        'timestamp': datetime.now().isoformat(),
+                        'status': 'received'
+                    }
+                    
+                    msg_index = len(messages['received'])
+                    messages['received'].append(message)
+                    
+                    # Store all part IDs for deletion
+                    part_ids = [p['id'] for p in parts_list]
+                    sms_modem_indices[msg_index] = part_ids
+                    
+                    log_message(f"[RECEIVER] ✓ COMBINED SMS from {phone} ({len(parts_list)} parts): {combined_text[:50]}")
+                    
+                    # Remove from sms_parts since we've stored it
+                    del sms_parts[msg_key]
         else:
             log_message(f"[RECEIVER] No +CMGL: in response (no messages or error)")
             
@@ -289,28 +328,34 @@ def send_sms(phone, message_text):
         log_message(f"[SMS ERROR] {str(e)}")
         return False, f"Error sending SMS: {str(e)}"
 
-def delete_sms_from_modem(modem_id):
-    """Delete SMS from modem by ID"""
+def delete_sms_from_modem(modem_ids):
+    """Delete SMS from modem by ID(s)"""
     global modem
     
     try:
         if modem is None or not modem_connected:
             return False, "Modem not connected"
         
-        log_message(f"[DELETE] Deleting SMS with ID {modem_id} from modem...")
-        cmd = f'AT+CMGD={modem_id}\r\n'
-        modem.write(cmd.encode())
-        time.sleep(0.5)
-        
-        response = modem.read(100)
-        log_message(f"[DELETE] Response: {response}")
-        
-        if b'OK' in response:
-            log_message(f"[DELETE] ✓ SMS {modem_id} deleted from modem")
-            return True, "SMS deleted"
+        # Handle both single ID and list of IDs
+        if isinstance(modem_ids, list):
+            for modem_id in modem_ids:
+                log_message(f"[DELETE] Deleting SMS with ID {modem_id} from modem...")
+                cmd = f'AT+CMGD={modem_id}\r\n'
+                modem.write(cmd.encode())
+                time.sleep(0.5)
+                response = modem.read(100)
+                log_message(f"[DELETE] Response: {response}")
         else:
-            log_message(f"[DELETE] ✗ Failed to delete SMS {modem_id}")
-            return False, "Failed to delete SMS"
+            modem_id = modem_ids
+            log_message(f"[DELETE] Deleting SMS with ID {modem_id} from modem...")
+            cmd = f'AT+CMGD={modem_id}\r\n'
+            modem.write(cmd.encode())
+            time.sleep(0.5)
+            response = modem.read(100)
+            log_message(f"[DELETE] Response: {response}")
+        
+        log_message(f"[DELETE] ✓ SMS deleted from modem")
+        return True, "SMS deleted"
     except Exception as e:
         log_message(f"[DELETE ERROR] {str(e)}")
         return False, str(e)
@@ -396,12 +441,12 @@ def delete_message(message_index):
         
         # If it's a received message, try to delete from modem
         if message['type'] == 'received':
-            # Find the modem ID
+            # Find the modem ID(s)
             for idx, msg in enumerate(messages['received']):
                 if msg == message:
                     if idx in sms_modem_indices:
-                        modem_id = sms_modem_indices[idx]
-                        success, status = delete_sms_from_modem(modem_id)
+                        modem_ids = sms_modem_indices[idx]
+                        success, status = delete_sms_from_modem(modem_ids)
                         if not success:
                             log_message(f"[API] Warning: Failed to delete from modem but removing from list")
                     
