@@ -57,8 +57,8 @@ messages = {
 # Track modem SMS indices for deletion
 sms_modem_indices = {}  # Map of message index to modem message ID
 
-# Track SMS parts for concatenation
-sms_parts = {}  # Map of (phone, timestamp) to list of parts
+# Track SMS parts for concatenation - DON'T store yet
+pending_parts = {}  # Map of (phone, timestamp) to list of parts with timestamps
 
 # GSM Modem setup
 modem = None
@@ -135,7 +135,7 @@ def init_modem():
 
 def read_sms_from_sim():
     """Read SMS from SIM card storage"""
-    global modem, processed_messages, sms_modem_indices, sms_parts
+    global modem, processed_messages, pending_parts
     
     try:
         if modem is None or not modem_connected:
@@ -194,73 +194,73 @@ def read_sms_from_sim():
                                     msg_key = (phone, timestamp_part)
                                     
                                     # Store this part
-                                    if msg_key not in sms_parts:
-                                        sms_parts[msg_key] = []
+                                    if msg_key not in pending_parts:
+                                        pending_parts[msg_key] = {
+                                            'parts': [],
+                                            'first_seen': time.time()
+                                        }
                                     
-                                    sms_parts[msg_key].append({
+                                    pending_parts[msg_key]['parts'].append({
                                         'id': msg_id,
                                         'text': decoded_text,
-                                        'order': len(sms_parts[msg_key])
                                     })
                                     
                                     processed_messages.add(msg_id)
-                                    log_message(f"[RECEIVER] Part {len(sms_parts[msg_key])} from {phone}: {decoded_text[:30]}...")
-                                    
-                                    # Try to store combined message immediately
-                                    try_combine_and_store_message(msg_key)
+                                    log_message(f"[RECEIVER] Part {len(pending_parts[msg_key]['parts'])} from {phone}: {decoded_text[:30]}...")
                     except Exception as e:
                         log_message(f"[RECEIVER] Error parsing line '{line}': {str(e)}")
                 
                 i += 1
         else:
             log_message(f"[RECEIVER] No +CMGL: in response (no messages or error)")
+        
+        # Now check pending parts for completion
+        current_time = time.time()
+        keys_to_remove = []
+        
+        for msg_key, msg_data in list(pending_parts.items()):
+            parts_list = msg_data['parts']
+            first_seen = msg_data['first_seen']
+            phone, timestamp_part = msg_key
+            
+            # Wait at least 6 seconds for all parts to arrive, OR if no new messages were found
+            if (current_time - first_seen > 6) or (len(response_str) < 100):
+                # Combine and store this message
+                combined_text = ''.join([p['text'] for p in parts_list])
+                
+                # Check if we already have this combined message
+                already_stored = any(
+                    m['phone'] == phone and m['message'] == combined_text 
+                    for m in messages['received']
+                )
+                
+                if not already_stored and combined_text:
+                    # Store combined message
+                    message = {
+                        'type': 'received',
+                        'phone': phone,
+                        'message': combined_text,
+                        'timestamp': datetime.now().isoformat(),
+                        'status': 'received'
+                    }
+                    
+                    msg_index = len(messages['received'])
+                    messages['received'].append(message)
+                    
+                    # Store all part IDs for deletion
+                    part_ids = [p['id'] for p in parts_list]
+                    sms_modem_indices[msg_index] = part_ids
+                    
+                    log_message(f"[RECEIVER] ✓ COMBINED SMS from {phone} ({len(parts_list)} parts): {combined_text[:50]}")
+                    
+                    keys_to_remove.append(msg_key)
+        
+        # Remove stored messages from pending
+        for key in keys_to_remove:
+            del pending_parts[key]
             
     except Exception as e:
         log_message(f"[RECEIVER ERROR] {str(e)}")
-
-def try_combine_and_store_message(msg_key):
-    """Try to combine and store a multi-part message"""
-    global sms_parts, sms_modem_indices
-    
-    if msg_key not in sms_parts:
-        return
-    
-    parts_list = sms_parts[msg_key]
-    phone, timestamp_part = msg_key
-    
-    # Sort parts by order
-    parts_list.sort(key=lambda x: x['order'])
-    
-    # Combine text
-    combined_text = ''.join([p['text'] for p in parts_list])
-    
-    # Check if we already have this combined message
-    already_stored = any(
-        m['phone'] == phone and m['message'] == combined_text 
-        for m in messages['received']
-    )
-    
-    if not already_stored and combined_text:
-        # Store combined message
-        message = {
-            'type': 'received',
-            'phone': phone,
-            'message': combined_text,
-            'timestamp': datetime.now().isoformat(),
-            'status': 'received'
-        }
-        
-        msg_index = len(messages['received'])
-        messages['received'].append(message)
-        
-        # Store all part IDs for deletion
-        part_ids = [p['id'] for p in parts_list]
-        sms_modem_indices[msg_index] = part_ids
-        
-        log_message(f"[RECEIVER] ✓ COMBINED SMS from {phone} ({len(parts_list)} parts): {combined_text[:50]}")
-        
-        # Remove from sms_parts since we've stored it
-        del sms_parts[msg_key]
 
 def receive_sms_loop():
     """Continuously poll for incoming SMS from SIM card"""
