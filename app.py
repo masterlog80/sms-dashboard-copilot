@@ -77,6 +77,9 @@ sms_modem_indices = {}  # Map of message index to modem message ID
 # Track SMS parts for concatenation - DON'T store yet
 pending_parts = {}  # Map of (phone, timestamp) to list of parts with timestamps
 
+# Modem lock to prevent simultaneous access
+modem_lock = threading.Lock()
+
 # GSM Modem setup
 modem = None
 modem_port = '/dev/ttyUSB0'
@@ -154,157 +157,159 @@ def get_sim_card_usage():
     """Get SIM card storage usage from modem"""
     global modem
     
-    try:
-        if modem is None or not modem_connected:
-            return {'used': 0, 'total': 20}
+    with modem_lock:
+        try:
+            if modem is None or not modem_connected:
+                return {'used': 0, 'total': 20}
+            
+            modem.write(b'AT+CPMS?\r\n')
+            time.sleep(0.5)
+            response = modem.read(200)
+            response_str = response.decode('utf-8', errors='ignore')
+            
+            # Parse: +CPMS: "SM",0,20,"SM",0,20,"SR",0,20
+            if '+CPMS:' in response_str:
+                # Extract numbers from response
+                numbers = re.findall(r'(\d+)', response_str)
+                if len(numbers) >= 2:
+                    used = int(numbers[0])
+                    total = int(numbers[1])
+                    return {'used': used, 'total': total}
+        except:
+            pass
         
-        modem.write(b'AT+CPMS?\r\n')
-        time.sleep(0.5)
-        response = modem.read(200)
-        response_str = response.decode('utf-8', errors='ignore')
-        
-        # Parse: +CPMS: "SM",0,20,"SM",0,20,"SR",0,20
-        if '+CPMS:' in response_str:
-            # Extract numbers from response
-            numbers = re.findall(r'(\d+)', response_str)
-            if len(numbers) >= 2:
-                used = int(numbers[0])
-                total = int(numbers[1])
-                return {'used': used, 'total': total}
-    except:
-        pass
-    
-    return {'used': 0, 'total': 20}
+        return {'used': 0, 'total': 20}
 
 def read_sms_from_sim():
     """Read SMS from SIM card storage"""
     global modem, processed_messages, pending_parts
     
-    try:
-        if modem is None or not modem_connected:
-            return
-        
-        # List unread SMS from SIM card
-        log_message("[RECEIVER] Querying unread SMS from SIM card...")
-        modem.write(b'AT+CMGL="REC UNREAD"\r\n')
-        time.sleep(1)
-        
-        response = modem.read(2000)
-        response_str = response.decode('utf-8', errors='ignore')
-        
-        log_message(f"[RECEIVER] Raw response length: {len(response_str)}")
-        
-        if '+CMGL:' in response_str:
-            log_message(f"[RECEIVER] Found SMS in response")
+    with modem_lock:
+        try:
+            if modem is None or not modem_connected:
+                return
             
-            # Parse messages
-            lines = response_str.split('\r\n')
-            i = 0
+            # List unread SMS from SIM card
+            log_message("[RECEIVER] Querying unread SMS from SIM card...")
+            modem.write(b'AT+CMGL="REC UNREAD"\r\n')
+            time.sleep(1)
             
-            while i < len(lines):
-                line = lines[i]
+            response = modem.read(2000)
+            response_str = response.decode('utf-8', errors='ignore')
+            
+            log_message(f"[RECEIVER] Raw response length: {len(response_str)}")
+            
+            if '+CMGL:' in response_str:
+                log_message(f"[RECEIVER] Found SMS in response")
                 
-                if '+CMGL:' in line:
-                    try:
-                        # Format: +CMGL: <id>,<stat>,"<oa/da>","<alpha>",<scts>[,<tooa>,<length>]
-                        log_message(f"[RECEIVER] Parsing line: {line}")
-                        
-                        # Extract message ID, phone number, and timestamp
-                        parts = line.split(',')
-                        
-                        if len(parts) >= 5:
-                            msg_id = parts[0].split(':')[1].strip()
-                            stat = parts[1].strip()
-                            phone = parts[2].strip().strip('"')
-                            # Reconstruct timestamp
-                            timestamp_part = parts[4].strip().strip('"')
+                # Parse messages
+                lines = response_str.split('\r\n')
+                i = 0
+                
+                while i < len(lines):
+                    line = lines[i]
+                    
+                    if '+CMGL:' in line:
+                        try:
+                            # Format: +CMGL: <id>,<stat>,"<oa/da>","<alpha>",<scts>[,<tooa>,<length>]
+                            log_message(f"[RECEIVER] Parsing line: {line}")
                             
-                            # Check if this specific message ID was already processed
-                            if msg_id in processed_messages:
-                                log_message(f"[RECEIVER] Message {msg_id} already processed, skipping")
-                                i += 1
-                                continue
+                            # Extract message ID, phone number, and timestamp
+                            parts = line.split(',')
                             
-                            # Message text is on next line
-                            if i + 1 < len(lines):
-                                message_text = lines[i + 1].strip()
+                            if len(parts) >= 5:
+                                msg_id = parts[0].split(':')[1].strip()
+                                stat = parts[1].strip()
+                                phone = parts[2].strip().strip('"')
+                                # Reconstruct timestamp
+                                timestamp_part = parts[4].strip().strip('"')
                                 
-                                if message_text:  # Only decode if there's text
-                                    # Try to decode if it's hex
-                                    decoded_text = try_decode_hex(message_text)
+                                # Check if this specific message ID was already processed
+                                if msg_id in processed_messages:
+                                    log_message(f"[RECEIVER] Message {msg_id} already processed, skipping")
+                                    i += 1
+                                    continue
+                                
+                                # Message text is on next line
+                                if i + 1 < len(lines):
+                                    message_text = lines[i + 1].strip()
                                     
-                                    if decoded_text:
-                                        # Create a key for grouping multi-part messages
-                                        msg_key = (phone, timestamp_part)
+                                    if message_text:  # Only decode if there's text
+                                        # Try to decode if it's hex
+                                        decoded_text = try_decode_hex(message_text)
                                         
-                                        # Store this part
-                                        if msg_key not in pending_parts:
-                                            pending_parts[msg_key] = {
-                                                'parts': [],
-                                                'first_seen': time.time()
-                                            }
-                                        
-                                        pending_parts[msg_key]['parts'].append({
-                                            'id': msg_id,
-                                            'text': decoded_text,
-                                        })
-                                        
-                                        processed_messages.add(msg_id)
-                                        log_message(f"[RECEIVER] Part {len(pending_parts[msg_key]['parts'])} from {phone}: {decoded_text[:30]}...")
-                    except Exception as e:
-                        log_message(f"[RECEIVER] Error parsing line '{line}': {str(e)}")
-                
-                i += 1
-        else:
-            log_message(f"[RECEIVER] No +CMGL: in response (no messages or error)")
-        
-        # Now check pending parts for completion
-        current_time = time.time()
-        keys_to_remove = []
-        
-        for msg_key, msg_data in list(pending_parts.items()):
-            parts_list = msg_data['parts']
-            first_seen = msg_data['first_seen']
-            phone, timestamp_part = msg_key
+                                        if decoded_text:
+                                            # Create a key for grouping multi-part messages
+                                            msg_key = (phone, timestamp_part)
+                                            
+                                            # Store this part
+                                            if msg_key not in pending_parts:
+                                                pending_parts[msg_key] = {
+                                                    'parts': [],
+                                                    'first_seen': time.time()
+                                                }
+                                            
+                                            pending_parts[msg_key]['parts'].append({
+                                                'id': msg_id,
+                                                'text': decoded_text,
+                                            })
+                                            
+                                            processed_messages.add(msg_id)
+                                            log_message(f"[RECEIVER] Part {len(pending_parts[msg_key]['parts'])} from {phone}: {decoded_text[:30]}...")
+                        except Exception as e:
+                            log_message(f"[RECEIVER] Error parsing line '{line}': {str(e)}")
+                    
+                    i += 1
+            else:
+                log_message(f"[RECEIVER] No +CMGL: in response (no messages or error)")
             
-            # Wait at least 6 seconds for all parts to arrive, OR if no new messages were found
-            if (current_time - first_seen > 6) or (len(response_str) < 100):
-                # Combine and store this message
-                combined_text = ''.join([p['text'] for p in parts_list])
-                
-                # Check if we already have this combined message
-                already_stored = any(
-                    m['phone'] == phone and m['message'] == combined_text 
-                    for m in messages['received']
-                )
-                
-                if not already_stored and combined_text:
-                    # Store combined message
-                    message = {
-                        'type': 'received',
-                        'phone': phone,
-                        'message': combined_text,
-                        'timestamp': datetime.now().isoformat(),
-                        'status': 'received'
-                    }
-                    
-                    msg_index = len(messages['received'])
-                    messages['received'].append(message)
-                    
-                    # Store all part IDs for deletion
-                    part_ids = [p['id'] for p in parts_list]
-                    sms_modem_indices[msg_index] = part_ids
-                    
-                    log_message(f"[RECEIVER] ✓ COMBINED SMS from {phone} ({len(parts_list)} parts): {combined_text[:50]}")
-                    
-                    keys_to_remove.append(msg_key)
-        
-        # Remove stored messages from pending
-        for key in keys_to_remove:
-            del pending_parts[key]
+            # Now check pending parts for completion
+            current_time = time.time()
+            keys_to_remove = []
             
-    except Exception as e:
-        log_message(f"[RECEIVER ERROR] {str(e)}")
+            for msg_key, msg_data in list(pending_parts.items()):
+                parts_list = msg_data['parts']
+                first_seen = msg_data['first_seen']
+                phone, timestamp_part = msg_key
+                
+                # Wait at least 6 seconds for all parts to arrive, OR if no new messages were found
+                if (current_time - first_seen > 6) or (len(response_str) < 100):
+                    # Combine and store this message
+                    combined_text = ''.join([p['text'] for p in parts_list])
+                    
+                    # Check if we already have this combined message
+                    already_stored = any(
+                        m['phone'] == phone and m['message'] == combined_text 
+                        for m in messages['received']
+                    )
+                    
+                    if not already_stored and combined_text:
+                        # Store combined message
+                        message = {
+                            'type': 'received',
+                            'phone': phone,
+                            'message': combined_text,
+                            'timestamp': datetime.now().isoformat(),
+                            'status': 'received'
+                        }
+                        
+                        msg_index = len(messages['received'])
+                        messages['received'].append(message)
+                        
+                        # Store all part IDs for deletion
+                        part_ids = [p['id'] for p in parts_list]
+                        sms_modem_indices[msg_index] = part_ids
+                        
+                        log_message(f"[RECEIVER] ✓ COMBINED SMS from {phone} ({len(parts_list)} parts): {combined_text[:50]}")
+                        
+                        keys_to_remove.append(msg_key)
+            
+            # Remove stored messages from pending
+            for key in keys_to_remove:
+                del pending_parts[key]
+                
+        except Exception as e:
+            log_message(f"[RECEIVER ERROR] {str(e)}")
 
 def receive_sms_loop():
     """Continuously poll for incoming SMS from SIM card"""
@@ -341,113 +346,121 @@ def send_sms(phone, message_text):
     """Send SMS via GSM modem"""
     global modem
     
-    log_message(f"[SMS] Attempting to send to {phone}")
-    
-    try:
-        if modem is None or not modem_connected:
-            log_message(f"[SMS ERROR] Modem not connected")
-            return False, "Modem not connected. Check /dev/ttyUSB0"
+    with modem_lock:
+        log_message(f"[SMS] Attempting to send to {phone}")
         
-        # Send SMS command
-        log_message(f"[SMS] Sending CMGS command...")
-        cmd = f'AT+CMGS="{phone}"\r\n'
-        modem.write(cmd.encode())
-        time.sleep(1)
-        
-        response = modem.read(100)
-        log_message(f"[SMS] CMGS response: {response}")
-        
-        if b'>' in response:
-            log_message(f"[SMS] Modem ready, sending message...")
-            modem.write(message_text.encode())
-            time.sleep(0.5)
-            modem.write(b'\x1A')  # Ctrl+Z
-            time.sleep(2)
+        try:
+            if modem is None or not modem_connected:
+                log_message(f"[SMS ERROR] Modem not connected")
+                return False, "Modem not connected. Check /dev/ttyUSB0"
             
-            response = modem.read(200)
-            log_message(f"[SMS] Send response: {response}")
+            # Clear buffer before sending
+            modem.flushInput()
+            modem.flushOutput()
+            time.sleep(0.2)
             
-            if b'+CMGS:' in response or b'OK' in response:
-                log_message(f"[SMS] ✓ Message sent successfully")
-                return True, "SMS sent successfully"
+            # Send SMS command
+            log_message(f"[SMS] Sending CMGS command...")
+            cmd = f'AT+CMGS="{phone}"\r\n'
+            modem.write(cmd.encode())
+            time.sleep(1)
+            
+            response = modem.read(100)
+            log_message(f"[SMS] CMGS response: {response}")
+            
+            if b'>' in response:
+                log_message(f"[SMS] Modem ready, sending message...")
+                modem.write(message_text.encode())
+                time.sleep(0.5)
+                modem.write(b'\x1A')  # Ctrl+Z
+                time.sleep(2)
+                
+                response = modem.read(200)
+                log_message(f"[SMS] Send response: {response}")
+                
+                if b'+CMGS:' in response or b'OK' in response:
+                    log_message(f"[SMS] ✓ Message sent successfully")
+                    return True, "SMS sent successfully"
+                else:
+                    log_message(f"[SMS] ✗ Unexpected response")
+                    return False, f"Unexpected modem response"
             else:
-                log_message(f"[SMS] ✗ Unexpected response")
-                return False, f"Unexpected modem response"
-        else:
-            log_message(f"[SMS] ✗ Modem not ready for message input")
-            return False, "Modem did not accept message command"
-            
-    except Exception as e:
-        log_message(f"[SMS ERROR] {str(e)}")
-        return False, f"Error sending SMS: {str(e)}"
+                log_message(f"[SMS] ✗ Modem not ready for message input")
+                return False, "Modem did not accept message command"
+                
+        except Exception as e:
+            log_message(f"[SMS ERROR] {str(e)}")
+            return False, f"Error sending SMS: {str(e)}"
 
 def delete_sms_from_modem(modem_ids):
     """Delete SMS from modem by ID(s)"""
     global modem
     
-    try:
-        if modem is None or not modem_connected:
-            return False, "Modem not connected"
-        
-        # Handle both single ID and list of IDs
-        if isinstance(modem_ids, list):
-            for modem_id in modem_ids:
+    with modem_lock:
+        try:
+            if modem is None or not modem_connected:
+                return False, "Modem not connected"
+            
+            # Handle both single ID and list of IDs
+            if isinstance(modem_ids, list):
+                for modem_id in modem_ids:
+                    log_message(f"[DELETE] Deleting SMS with ID {modem_id} from modem...")
+                    cmd = f'AT+CMGD={modem_id}\r\n'
+                    modem.write(cmd.encode())
+                    time.sleep(0.5)
+                    response = modem.read(100)
+                    log_message(f"[DELETE] Response: {response}")
+            else:
+                modem_id = modem_ids
                 log_message(f"[DELETE] Deleting SMS with ID {modem_id} from modem...")
                 cmd = f'AT+CMGD={modem_id}\r\n'
                 modem.write(cmd.encode())
                 time.sleep(0.5)
                 response = modem.read(100)
                 log_message(f"[DELETE] Response: {response}")
-        else:
-            modem_id = modem_ids
-            log_message(f"[DELETE] Deleting SMS with ID {modem_id} from modem...")
-            cmd = f'AT+CMGD={modem_id}\r\n'
-            modem.write(cmd.encode())
-            time.sleep(0.5)
-            response = modem.read(100)
-            log_message(f"[DELETE] Response: {response}")
-        
-        log_message(f"[DELETE] ✓ SMS deleted from modem")
-        return True, "SMS deleted"
-    except Exception as e:
-        log_message(f"[DELETE ERROR] {str(e)}")
-        return False, str(e)
+            
+            log_message(f"[DELETE] ✓ SMS deleted from modem")
+            return True, "SMS deleted"
+        except Exception as e:
+            log_message(f"[DELETE ERROR] {str(e)}")
+            return False, str(e)
 
 def clear_sim_storage():
     """Delete all SMS from modem SIM card storage"""
     global modem
     
-    try:
-        if modem is None or not modem_connected:
-            return False, "Modem not connected"
-        
-        log_message(f"[CLEAR] Deleting all SMS from SIM card...")
-        modem.write(b'AT+CMGD=1,4\r\n')  # Delete all messages
-        time.sleep(2)  # Increased wait time
-        response = modem.read(200)
-        log_message(f"[CLEAR] Response: {response}")
-        
-        # Check for OK in response
-        if b'OK' in response or len(response) > 0:
-            log_message(f"[CLEAR] ✓ All SMS deleted from SIM card")
-            return True, "SIM storage cleared"
-        else:
-            log_message(f"[CLEAR] Checking storage status...")
-            # Verify by checking storage
-            modem.write(b'AT+CPMS?\r\n')
-            time.sleep(1)
-            status_response = modem.read(200)
-            log_message(f"[CLEAR] Storage status: {status_response}")
+    with modem_lock:
+        try:
+            if modem is None or not modem_connected:
+                return False, "Modem not connected"
             
-            if b'CPMS' in status_response or b'OK' in status_response:
+            log_message(f"[CLEAR] Deleting all SMS from SIM card...")
+            modem.write(b'AT+CMGD=1,4\r\n')  # Delete all messages
+            time.sleep(2)  # Increased wait time
+            response = modem.read(200)
+            log_message(f"[CLEAR] Response: {response}")
+            
+            # Check for OK in response
+            if b'OK' in response or len(response) > 0:
                 log_message(f"[CLEAR] ✓ All SMS deleted from SIM card")
                 return True, "SIM storage cleared"
             else:
-                log_message(f"[CLEAR] ✗ Failed to clear SIM storage")
-                return False, "Failed to clear SIM storage"
-    except Exception as e:
-        log_message(f"[CLEAR ERROR] {str(e)}")
-        return False, str(e)
+                log_message(f"[CLEAR] Checking storage status...")
+                # Verify by checking storage
+                modem.write(b'AT+CPMS?\r\n')
+                time.sleep(1)
+                status_response = modem.read(200)
+                log_message(f"[CLEAR] Storage status: {status_response}")
+                
+                if b'CPMS' in status_response or b'OK' in status_response:
+                    log_message(f"[CLEAR] ✓ All SMS deleted from SIM card")
+                    return True, "SIM storage cleared"
+                else:
+                    log_message(f"[CLEAR] ✗ Failed to clear SIM storage")
+                    return False, "Failed to clear SIM storage"
+        except Exception as e:
+            log_message(f"[CLEAR ERROR] {str(e)}")
+            return False, str(e)
 
 @app.route('/')
 def index():
