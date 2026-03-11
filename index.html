@@ -50,6 +50,10 @@
             margin-bottom: 30px;
         }
         
+        .dashboard.three-column {
+            grid-template-columns: 1fr 1fr 1fr;
+        }
+        
         .card {
             background: white;
             border-radius: 10px;
@@ -499,8 +503,18 @@
             display: block;
         }
         
+        @media (max-width: 1200px) {
+            .dashboard.three-column {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+        
         @media (max-width: 768px) {
             .dashboard {
+                grid-template-columns: 1fr;
+            }
+            
+            .dashboard.three-column {
                 grid-template-columns: 1fr;
             }
             
@@ -542,7 +556,7 @@
             <p class="datetime" id="datetime">Current Date and Time (UTC): Loading...</p>
         </header>
         
-        <div class="dashboard">
+        <div class="dashboard three-column">
             <!-- Statistics Card -->
             <div class="card">
                 <h2>📊 Statistics</h2>
@@ -555,6 +569,33 @@
                         <div class="stat-number" id="unread-messages">0</div>
                         <div class="stat-label">Unread</div>
                     </div>
+                </div>
+            </div>
+            
+            <!-- Settings Card -->
+            <div class="card">
+                <h2>⚙️ Settings</h2>
+                
+                <!-- SMS Service Center -->
+                <div class="sca-container">
+                    <div class="sca-info">
+                        <div class="sca-label">📱 SMS Service Center (SCA):</div>
+                        <div class="sca-value" id="sca-display">Loading...</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="sca-input">Set Custom SCA:</label>
+                        <input type="tel" id="sca-input" placeholder="+393935000001" value="">
+                    </div>
+                    
+                    <div class="sca-presets">
+                        <button class="preset-btn" onclick="setSCAPreset('+393935000001')">Vodafone 🇮🇹</button>
+                        <button class="preset-btn" onclick="setSCAPreset('+393803020020')">TIM 🇮🇹</button>
+                        <button class="preset-btn" onclick="setSCAPreset('+393207300000')">Wind 3 🇮🇹</button>
+                        <button class="preset-btn" onclick="setSCAPreset('+393491000001')">Tre 🇮🇹</button>
+                    </div>
+                    
+                    <button class="sca-btn" onclick="updateSCA()">✅ Update SCA</button>
                 </div>
             </div>
             
@@ -594,28 +635,6 @@
                     <div class="progress-bar">
                         <div class="progress-fill" id="sim-progress" style="width: 0%">0%</div>
                     </div>
-                </div>
-                
-                <!-- SMS Service Center -->
-                <div class="sca-container">
-                    <div class="sca-info">
-                        <div class="sca-label">📱 SMS Service Center (SCA):</div>
-                        <div class="sca-value" id="sca-display">Loading...</div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="sca-input">Set Custom SCA:</label>
-                        <input type="tel" id="sca-input" placeholder="+393935000001" value="">
-                    </div>
-                    
-                    <div class="sca-presets">
-                        <button class="preset-btn" onclick="setSCAPreset('+393935000001')">Vodafone 🇮🇹</button>
-                        <button class="preset-btn" onclick="setSCAPreset('+393803020020')">TIM 🇮🇹</button>
-                        <button class="preset-btn" onclick="setSCAPreset('+393207300000')">Wind 3 🇮🇹</button>
-                        <button class="preset-btn" onclick="setSCAPreset('+393491000001')">Tre 🇮🇹</button>
-                    </div>
-                    
-                    <button class="sca-btn" onclick="updateSCA()">✅ Update SCA</button>
                 </div>
                 
                 <button class="clear-btn" onclick="clearSIMStorage()" style="margin-top: 15px;">🗑️ Clear SIM Storage</button>
