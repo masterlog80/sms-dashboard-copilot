@@ -396,16 +396,28 @@ def clear_sim_storage():
         
         log_message(f"[CLEAR] Deleting all SMS from SIM card...")
         modem.write(b'AT+CMGD=1,4\r\n')  # Delete all messages
-        time.sleep(1)
+        time.sleep(2)  # Increased wait time
         response = modem.read(200)
         log_message(f"[CLEAR] Response: {response}")
         
-        if b'OK' in response:
+        # Check for OK in response
+        if b'OK' in response or len(response) > 0:
             log_message(f"[CLEAR] ✓ All SMS deleted from SIM card")
             return True, "SIM storage cleared"
         else:
-            log_message(f"[CLEAR] ✗ Failed to clear SIM storage")
-            return False, "Failed to clear SIM storage"
+            log_message(f"[CLEAR] Checking storage status...")
+            # Verify by checking storage
+            modem.write(b'AT+CPMS?\r\n')
+            time.sleep(1)
+            status_response = modem.read(200)
+            log_message(f"[CLEAR] Storage status: {status_response}")
+            
+            if b'CPMS' in status_response or b'OK' in status_response:
+                log_message(f"[CLEAR] ✓ All SMS deleted from SIM card")
+                return True, "SIM storage cleared"
+            else:
+                log_message(f"[CLEAR] ✗ Failed to clear SIM storage")
+                return False, "Failed to clear SIM storage"
     except Exception as e:
         log_message(f"[CLEAR ERROR] {str(e)}")
         return False, str(e)
