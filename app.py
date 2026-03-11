@@ -153,6 +153,52 @@ def init_modem():
         modem_connected = False
         return False
 
+def diagnose_modem():
+    """Diagnose modem and network status"""
+    global modem
+    
+    with modem_lock:
+        try:
+            if modem is None or not modem_connected:
+                return "Modem not connected"
+            
+            log_message("[DIAG] Starting modem diagnosis...")
+            
+            # Check signal strength
+            modem.write(b'AT+CSQ\r\n')
+            time.sleep(0.5)
+            response = modem.read(100)
+            log_message(f"[DIAG] Signal strength: {response}")
+            
+            # Check network registration
+            modem.write(b'AT+CREG?\r\n')
+            time.sleep(0.5)
+            response = modem.read(100)
+            log_message(f"[DIAG] Network registration: {response}")
+            
+            # Check operator
+            modem.write(b'AT+COPS?\r\n')
+            time.sleep(0.5)
+            response = modem.read(100)
+            log_message(f"[DIAG] Operator: {response}")
+            
+            # Check SMS service center
+            modem.write(b'AT+CSCA?\r\n')
+            time.sleep(0.5)
+            response = modem.read(100)
+            log_message(f"[DIAG] SMS Service Center: {response}")
+            
+            # Check phone number
+            modem.write(b'AT+CNUM\r\n')
+            time.sleep(0.5)
+            response = modem.read(100)
+            log_message(f"[DIAG] Phone number: {response}")
+            
+            return "Diagnosis complete - check logs"
+        except Exception as e:
+            log_message(f"[DIAG ERROR] {str(e)}")
+            return f"Diagnosis error: {str(e)}"
+
 def get_sim_card_usage():
     """Get SIM card storage usage from modem"""
     global modem
@@ -650,6 +696,12 @@ def clear_sim_storage_api():
             'status': 'error',
             'message': str(e)
         }), 500
+
+@app.route('/api/modem/diagnose', methods=['GET'])
+def diagnose():
+    """Run modem diagnostics"""
+    result = diagnose_modem()
+    return jsonify({'status': 'ok', 'message': result})
 
 @app.route('/api/modem/status', methods=['GET'])
 def modem_status():
