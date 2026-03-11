@@ -314,6 +314,14 @@
             border-left: 3px solid #4caf50;
         }
         
+        .signal-info.warning {
+            border-left-color: #ff9800;
+        }
+        
+        .signal-info.danger {
+            border-left-color: #f44336;
+        }
+        
         .signal-label {
             font-weight: bold;
             color: #333;
@@ -328,6 +336,14 @@
             font-family: monospace;
         }
         
+        .signal-info.warning .signal-value {
+            color: #ff9800;
+        }
+        
+        .signal-info.danger .signal-value {
+            color: #f44336;
+        }
+        
         .signal-bars {
             display: flex;
             gap: 4px;
@@ -337,20 +353,72 @@
         
         .signal-bar {
             width: 8px;
+            height: 4px;
             background: #e0e0e0;
             border-radius: 2px;
         }
         
         .signal-bar.active {
             background: #4caf50;
+            height: 6px;
+        }
+        
+        .signal-bar.active:nth-child(2) {
+            height: 10px;
+        }
+        
+        .signal-bar.active:nth-child(3) {
+            height: 14px;
+        }
+        
+        .signal-bar.active:nth-child(4) {
+            height: 18px;
+        }
+        
+        .signal-bar.active:nth-child(5) {
+            height: 22px;
         }
         
         .signal-bar.warning {
             background: #ff9800;
+            height: 6px;
+        }
+        
+        .signal-bar.warning:nth-child(2) {
+            height: 10px;
+        }
+        
+        .signal-bar.warning:nth-child(3) {
+            height: 14px;
+        }
+        
+        .signal-bar.warning:nth-child(4) {
+            height: 18px;
+        }
+        
+        .signal-bar.warning:nth-child(5) {
+            height: 22px;
         }
         
         .signal-bar.danger {
             background: #f44336;
+            height: 6px;
+        }
+        
+        .signal-bar.danger:nth-child(2) {
+            height: 10px;
+        }
+        
+        .signal-bar.danger:nth-child(3) {
+            height: 14px;
+        }
+        
+        .signal-bar.danger:nth-child(4) {
+            height: 18px;
+        }
+        
+        .signal-bar.danger:nth-child(5) {
+            height: 22px;
         }
         
         .sca-container {
@@ -504,7 +572,7 @@
                 
                 <!-- Signal Strength -->
                 <div class="signal-container">
-                    <div class="signal-info">
+                    <div class="signal-info" id="signal-info">
                         <div class="signal-label">📶 Signal Strength:</div>
                         <div class="signal-value" id="signal-strength">Loading...</div>
                         <div class="signal-bars" id="signal-bars">
@@ -640,6 +708,7 @@
         function updateSignalDisplay(rssi, quality) {
             const signalValue = document.getElementById('signal-strength');
             const signalBars = document.getElementById('signal-bars');
+            const signalInfo = document.getElementById('signal-info');
             
             // RSSI: -113 to -51 dBm (lower is worse)
             // Convert to bars: 0-5
@@ -651,21 +720,31 @@
             else if (rssi >= -91) bars = 1;
             else bars = 0;
             
+            // Determine quality level
+            let qualityClass = 'danger'; // Default to danger for poor signal
+            if (bars >= 4) {
+                qualityClass = 'active'; // Green - good signal
+            } else if (bars >= 2) {
+                qualityClass = 'warning'; // Orange - medium signal
+            }
+            
             // Display value
             signalValue.textContent = `${rssi} dBm (${bars}/5 bars)`;
+            
+            // Update signal info box color
+            signalInfo.classList.remove('warning', 'danger');
+            if (qualityClass === 'warning') {
+                signalInfo.classList.add('warning');
+            } else if (qualityClass === 'danger') {
+                signalInfo.classList.add('danger');
+            }
             
             // Update bar indicators
             const barElements = signalBars.querySelectorAll('.signal-bar');
             barElements.forEach((bar, index) => {
                 bar.classList.remove('active', 'warning', 'danger');
                 if (index < bars) {
-                    if (bars >= 4) {
-                        bar.classList.add('active');
-                    } else if (bars >= 2) {
-                        bar.classList.add('warning');
-                    } else {
-                        bar.classList.add('danger');
-                    }
+                    bar.classList.add(qualityClass);
                 }
             });
         }
