@@ -130,6 +130,24 @@
             cursor: not-allowed;
         }
         
+        .button-group {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+        }
+        
+        .button-group button {
+            flex: 1;
+        }
+        
+        .clear-btn {
+            background: #ff9800;
+        }
+        
+        .clear-btn:hover {
+            background: #f57c00;
+        }
+        
         .messages-list {
             max-height: 400px;
             overflow-y: auto;
@@ -274,6 +292,10 @@
             .delete-btn {
                 width: 100%;
             }
+            
+            .button-group {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
@@ -311,6 +333,7 @@
                     <p><strong>Port:</strong> /dev/ttyUSB0</p>
                     <p><strong>Baud Rate:</strong> 9600</p>
                 </div>
+                <button class="clear-btn" onclick="clearSIMStorage()" style="margin-top: 15px;">🗑️ Clear SIM Storage</button>
             </div>
         </div>
         
@@ -421,6 +444,29 @@
                 .catch(error => {
                     console.error('Error:', error);
                     showAlert('❌ Error deleting message', 'error');
+                });
+            }
+        }
+        
+        // Clear SIM Storage
+        function clearSIMStorage() {
+            if (confirm('⚠️ This will delete ALL SMS from SIM card storage and clear the dashboard. Continue?')) {
+                fetch('/api/clear-sim-storage', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        showAlert('✅ SIM storage cleared successfully!', 'success');
+                        loadStats();
+                        loadMessages();
+                    } else {
+                        showAlert('❌ Error clearing SIM storage: ' + data.message, 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showAlert('❌ Error clearing SIM storage', 'error');
                 });
             }
         }
