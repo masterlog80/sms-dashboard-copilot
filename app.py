@@ -30,20 +30,11 @@ def try_decode_hex(text):
     try:
         # Check if it looks like hex (all hex characters)
         if not all(c in '0123456789ABCDEFabcdef' for c in text.strip()):
-            return text  # Not hex encoded
+            return text  # Not hex encoded, return as-is
         
         hex_str = text.strip()
         
-        # Try UCS2 decoding first (big-endian Unicode)
-        # UCS2 uses 4 hex chars per character (2 bytes)
-        try:
-            decoded = bytes.fromhex(hex_str).decode('utf-16-be', errors='ignore')
-            if decoded and len(decoded) > 5:  # Real text should be longer than 5 chars
-                return decoded
-        except:
-            pass
-        
-        # Try UTF-16BE decoding
+        # Try UTF-16BE decoding first (UCS2 - common for Unicode SMS)
         try:
             decoded = bytes.fromhex(hex_str).decode('utf-16-be', errors='ignore')
             if decoded and len(decoded) > 0:
@@ -67,7 +58,8 @@ def try_decode_hex(text):
         except:
             pass
         
-    except:
+    except Exception as e:
+        log_message(f"[DECODE ERROR] {str(e)}")
         pass
     
     return text  # Return original if decoding fails
@@ -210,27 +202,28 @@ def read_sms_from_sim():
                             if i + 1 < len(lines):
                                 message_text = lines[i + 1].strip()
                                 
-                                # Try to decode if it's hex
-                                decoded_text = try_decode_hex(message_text)
-                                
-                                if decoded_text:
-                                    # Create a key for grouping multi-part messages
-                                    msg_key = (phone, timestamp_part)
+                                if message_text:  # Only decode if there's text
+                                    # Try to decode if it's hex
+                                    decoded_text = try_decode_hex(message_text)
                                     
-                                    # Store this part
-                                    if msg_key not in pending_parts:
-                                        pending_parts[msg_key] = {
-                                            'parts': [],
-                                            'first_seen': time.time()
-                                        }
-                                    
-                                    pending_parts[msg_key]['parts'].append({
-                                        'id': msg_id,
-                                        'text': decoded_text,
-                                    })
-                                    
-                                    processed_messages.add(msg_id)
-                                    log_message(f"[RECEIVER] Part {len(pending_parts[msg_key]['parts'])} from {phone}: {decoded_text[:30]}...")
+                                    if decoded_text:
+                                        # Create a key for grouping multi-part messages
+                                        msg_key = (phone, timestamp_part)
+                                        
+                                        # Store this part
+                                        if msg_key not in pending_parts:
+                                            pending_parts[msg_key] = {
+                                                'parts': [],
+                                                'first_seen': time.time()
+                                            }
+                                        
+                                        pending_parts[msg_key]['parts'].append({
+                                            'id': msg_id,
+                                            'text': decoded_text,
+                                        })
+                                        
+                                        processed_messages.add(msg_id)
+                                        log_message(f"[RECEIVER] Part {len(pending_parts[msg_key]['parts'])} from {phone}: {decoded_text[:30]}...")
                     except Exception as e:
                         log_message(f"[RECEIVER] Error parsing line '{line}': {str(e)}")
                 
