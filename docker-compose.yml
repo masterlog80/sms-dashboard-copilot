@@ -1,7 +1,1 @@
-version: '3'
-services:
-  app:
-    image: your_image_name
-    ports:
-      - '5000:5000'
-    # Add other configurations here
+version: '3.8'\nservices:\n  sms_dashboard:\n    build: .\n    ports:\n      - '5000:5000'\n    volumes:\n      - /dev/ttyUSB0:/dev/ttyUSB0\n      - ./data:/app/data\n    environment:\n      - ENV_VAR_1=value1\n      - ENV_VAR_2=value2\n      - ENV_VAR_3=value3\n
