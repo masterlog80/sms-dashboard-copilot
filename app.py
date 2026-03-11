@@ -1,15 +1,80 @@
 from flask import Flask, render_template, request, jsonify
 import os
 import json
+import serial
+import time
 from datetime import datetime
+import threading
 
 app = Flask(__name__, template_folder='.')
 
-# In-memory message storage (replace with database later)
+# In-memory message storage
 messages = {
     'sent': [],
     'received': []
 }
+
+# GSM Modem setup
+modem = None
+modem_port = '/dev/ttyUSB0'
+modem_baudrate = 9600
+
+def init_modem():
+    """Initialize GSM modem connection"""
+    global modem
+    try:
+        modem = serial.Serial(modem_port, modem_baudrate, timeout=1)
+        time.sleep(1)
+        
+        # Test modem with AT command
+        modem.write(b'AT\r\n')
+        time.sleep(0.5)
+        response = modem.read(100)
+        
+        if b'OK' in response:
+            print("✓ GSM Modem initialized successfully")
+            # Set text mode
+            modem.write(b'AT+CMGF=1\r\n')
+            time.sleep(0.5)
+            modem.read(100)
+            return True
+        else:
+            print("✗ GSM Modem not responding")
+            modem.close()
+            modem = None
+            return False
+    except Exception as e:
+        print(f"✗ Error initializing modem: {str(e)}")
+        modem = None
+        return False
+
+def send_sms(phone, message_text):
+    """Send SMS via GSM modem"""
+    try:
+        if modem is None:
+            return False, "Modem not connected"
+        
+        # Send SMS command
+        cmd = f'AT+CMGS="{phone}"\r\n'
+        modem.write(cmd.encode())
+        time.sleep(0.5)
+        
+        # Send message text
+        modem.write(message_text.encode())
+        time.sleep(0.5)
+        
+        # Send Ctrl+Z to send
+        modem.write(b'\x1A')
+        time.sleep(1)
+        
+        response = modem.read(200).decode('utf-8', errors='ignore')
+        
+        if '+CMGS:' in response or 'OK' in response:
+            return True, "SMS sent successfully"
+        else:
+            return False, f"Modem error: {response}"
+    except Exception as e:
+        return False, f"Error sending SMS: {str(e)}"
 
 @app.route('/')
 def index():
@@ -27,69 +92,67 @@ def get_stats():
 @app.route('/api/messages', methods=['GET'])
 def get_messages():
     all_messages = messages['sent'] + messages['received']
-    # Sort by timestamp (newest first)
     all_messages.sort(key=lambda x: x['timestamp'], reverse=True)
-    return jsonify(all_messages[:50])  # Return last 50 messages
+    return jsonify(all_messages[:50])
 
 @app.route('/api/message', methods=['POST'])
 def send_message():
     try:
         data = request.json
+        phone = data.get('phone')
+        message_text = data.get('message')
         
-        # Create message object
-        message = {
-            'type': 'sent',
-            'phone': data.get('phone'),
-            'message': data.get('message'),
-            'timestamp': datetime.now().isoformat(),
-            'status': 'sent'
-        }
+        # Send via modem
+        success, status = send_sms(phone, message_text)
         
         # Store message
-        messages['sent'].append(message)
-        
-        print(f"SMS sent to {data.get('phone')}: {data.get('message')}")
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'SMS sent successfully',
-            'data': message
-        }), 200
-    except Exception as e:
-        print(f"Error sending SMS: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
-
-@app.route('/api/receive', methods=['POST'])
-def receive_sms():
-    """Endpoint to receive incoming SMS from GSM modem"""
-    try:
-        data = request.json
-        
         message = {
-            'type': 'received',
-            'phone': data.get('phone'),
-            'message': data.get('message'),
+            'type': 'sent',
+            'phone': phone,
+            'message': message_text,
             'timestamp': datetime.now().isoformat(),
-            'status': 'received'
+            'status': 'sent' if success else 'failed'
         }
         
-        messages['received'].append(message)
+        messages['sent'].append(message)
         
-        print(f"SMS received from {data.get('phone')}: {data.get('message')}")
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'SMS received'
-        }), 200
+        if success:
+            print(f"✓ SMS sent to {phone}")
+            return jsonify({
+                'status': 'success',
+                'message': 'SMS sent successfully',
+                'data': message
+            }), 200
+        else:
+            print(f"✗ Failed to send SMS to {phone}: {status}")
+            return jsonify({
+                'status': 'error',
+                'message': status,
+                'data': message
+            }), 500
     except Exception as e:
-        print(f"Error receiving SMS: {str(e)}")
+        print(f"✗ Error: {str(e)}")
         return jsonify({
             'status': 'error',
             'message': str(e)
         }), 500
 
+@app.route('/api/modem/status', methods=['GET'])
+def modem_status():
+    """Check modem connection status"""
+    status = modem is not None
+    return jsonify({
+        'connected': status,
+        'port': modem_port,
+        'baudrate': modem_baudrate
+    })
+
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Initialize modem on startup
+    init_modem()
+    
+    try:
+        app.run(debug=False, host='0.0.0.0', port=5000)
+    finally:
+        if modem:
+            modem.close()
