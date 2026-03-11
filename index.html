@@ -298,6 +298,61 @@
             background: linear-gradient(90deg, #f44336 0%, #da190b 100%);
         }
         
+        .signal-container {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 5px;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .signal-info {
+            margin-bottom: 15px;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            border-left: 3px solid #4caf50;
+        }
+        
+        .signal-label {
+            font-weight: bold;
+            color: #333;
+            font-size: 0.9em;
+        }
+        
+        .signal-value {
+            color: #4caf50;
+            font-weight: bold;
+            font-size: 1.1em;
+            margin-top: 5px;
+            font-family: monospace;
+        }
+        
+        .signal-bars {
+            display: flex;
+            gap: 4px;
+            margin-top: 8px;
+            align-items: flex-end;
+        }
+        
+        .signal-bar {
+            width: 8px;
+            background: #e0e0e0;
+            border-radius: 2px;
+        }
+        
+        .signal-bar.active {
+            background: #4caf50;
+        }
+        
+        .signal-bar.warning {
+            background: #ff9800;
+        }
+        
+        .signal-bar.danger {
+            background: #f44336;
+        }
+        
         .sca-container {
             margin-top: 20px;
             padding: 15px;
@@ -447,6 +502,21 @@
                     <p><strong>Baud Rate:</strong> 9600</p>
                 </div>
                 
+                <!-- Signal Strength -->
+                <div class="signal-container">
+                    <div class="signal-info">
+                        <div class="signal-label">📶 Signal Strength:</div>
+                        <div class="signal-value" id="signal-strength">Loading...</div>
+                        <div class="signal-bars" id="signal-bars">
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- SIM Card Usage Progress -->
                 <div class="progress-container">
                     <div class="progress-label">
@@ -547,6 +617,57 @@
                     }
                 })
                 .catch(error => console.error('Error loading stats:', error));
+        }
+        
+        // Load signal strength
+        function loadSignalStrength() {
+            fetch('/api/modem/signal-strength')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        updateSignalDisplay(data.rssi, data.quality);
+                    } else {
+                        document.getElementById('signal-strength').textContent = 'Unable to read';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading signal strength:', error);
+                    document.getElementById('signal-strength').textContent = 'Error reading signal';
+                });
+        }
+        
+        // Update signal strength display
+        function updateSignalDisplay(rssi, quality) {
+            const signalValue = document.getElementById('signal-strength');
+            const signalBars = document.getElementById('signal-bars');
+            
+            // RSSI: -113 to -51 dBm (lower is worse)
+            // Convert to bars: 0-5
+            let bars = 0;
+            if (rssi >= -51) bars = 5;
+            else if (rssi >= -61) bars = 4;
+            else if (rssi >= -71) bars = 3;
+            else if (rssi >= -81) bars = 2;
+            else if (rssi >= -91) bars = 1;
+            else bars = 0;
+            
+            // Display value
+            signalValue.textContent = `${rssi} dBm (${bars}/5 bars)`;
+            
+            // Update bar indicators
+            const barElements = signalBars.querySelectorAll('.signal-bar');
+            barElements.forEach((bar, index) => {
+                bar.classList.remove('active', 'warning', 'danger');
+                if (index < bars) {
+                    if (bars >= 4) {
+                        bar.classList.add('active');
+                    } else if (bars >= 2) {
+                        bar.classList.add('warning');
+                    } else {
+                        bar.classList.add('danger');
+                    }
+                }
+            });
         }
         
         // Load SCA
@@ -755,12 +876,18 @@
         loadStats();
         loadMessages();
         loadSCA();
+        loadSignalStrength();
         
         // Refresh stats and messages every 5 seconds
         setInterval(() => {
             loadStats();
             loadMessages();
         }, 5000);
+        
+        // Refresh signal strength every 10 seconds
+        setInterval(() => {
+            loadSignalStrength();
+        }, 10000);
         
         // Refresh SCA every 30 seconds
         setInterval(() => {
