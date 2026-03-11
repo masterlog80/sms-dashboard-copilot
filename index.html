@@ -246,6 +246,46 @@
             color: #333;
         }
         
+        .progress-container {
+            margin-top: 20px;
+        }
+        
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4caf50 0%, #45a049 100%);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.75em;
+            font-weight: bold;
+        }
+        
+        .progress-fill.warning {
+            background: linear-gradient(90deg, #ff9800 0%, #f57c00 100%);
+        }
+        
+        .progress-fill.danger {
+            background: linear-gradient(90deg, #f44336 0%, #da190b 100%);
+        }
+        
         .alert {
             padding: 15px;
             border-radius: 5px;
@@ -333,6 +373,18 @@
                     <p><strong>Port:</strong> /dev/ttyUSB0</p>
                     <p><strong>Baud Rate:</strong> 9600</p>
                 </div>
+                
+                <!-- SIM Card Usage Progress -->
+                <div class="progress-container">
+                    <div class="progress-label">
+                        <span>💾 SIM Card Storage</span>
+                        <span id="sim-usage">0/20</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="sim-progress" style="width: 0%">0%</div>
+                    </div>
+                </div>
+                
                 <button class="clear-btn" onclick="clearSIMStorage()" style="margin-top: 15px;">🗑️ Clear SIM Storage</button>
             </div>
         </div>
@@ -393,8 +445,32 @@
                 .then(data => {
                     document.getElementById('total-messages').textContent = data.total_messages;
                     document.getElementById('unread-messages').textContent = data.unread_messages;
+                    
+                    // Update SIM card usage
+                    if (data.sim_usage !== undefined) {
+                        updateSimUsage(data.sim_usage.used, data.sim_usage.total);
+                    }
                 })
                 .catch(error => console.error('Error loading stats:', error));
+        }
+        
+        // Update SIM card usage display
+        function updateSimUsage(used, total) {
+            const percentage = Math.round((used / total) * 100);
+            const progressFill = document.getElementById('sim-progress');
+            const usageText = document.getElementById('sim-usage');
+            
+            progressFill.style.width = percentage + '%';
+            progressFill.textContent = percentage + '%';
+            usageText.textContent = used + '/' + total;
+            
+            // Change color based on usage
+            progressFill.classList.remove('warning', 'danger');
+            if (percentage >= 90) {
+                progressFill.classList.add('danger');
+            } else if (percentage >= 70) {
+                progressFill.classList.add('warning');
+            }
         }
         
         // Load messages
