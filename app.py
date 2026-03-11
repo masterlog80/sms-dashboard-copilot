@@ -199,6 +199,46 @@ def diagnose_modem():
             log_message(f"[DIAG ERROR] {str(e)}")
             return f"Diagnosis error: {str(e)}"
 
+def get_signal_strength():
+    """Get current signal strength from modem"""
+    global modem
+    
+    with modem_lock:
+        try:
+            if modem is None or not modem_connected:
+                return None, None, "Modem not connected"
+            
+            modem.write(b'AT+CSQ\r\n')
+            time.sleep(0.5)
+            response = modem.read(100)
+            response_str = response.decode('utf-8', errors='ignore')
+            
+            log_message(f"[SIGNAL] Response: {response_str}")
+            
+            # Parse: +CSQ: 5,99
+            # Format: +CSQ: <rssi>,<ber>
+            # RSSI: 0-31 (0=-113dBm, 1=-111dBm ... 31=-51dBm, 99=not known)
+            if '+CSQ:' in response_str:
+                match = re.search(r'\+CSQ:\s*(\d+),(\d+)', response_str)
+                if match:
+                    rssi_val = int(match.group(1))
+                    ber = int(match.group(2))
+                    
+                    # Convert RSSI to dBm
+                    if rssi_val == 99:
+                        rssi_dbm = "Unknown"
+                        quality = 0
+                    else:
+                        rssi_dbm = -113 + (2 * rssi_val)
+                        quality = rssi_val
+                    
+                    log_message(f"[SIGNAL] RSSI: {rssi_dbm} dBm, Quality: {quality}, BER: {ber}")
+                    return rssi_dbm, quality, "OK"
+        except Exception as e:
+            log_message(f"[SIGNAL ERROR] {str(e)}")
+        
+        return None, None, "Unable to read signal strength"
+
 def get_sms_service_center():
     """Get current SMS Service Center"""
     global modem
@@ -757,6 +797,23 @@ def diagnose():
     """Run modem diagnostics"""
     result = diagnose_modem()
     return jsonify({'status': 'ok', 'message': result})
+
+@app.route('/api/modem/signal-strength', methods=['GET'])
+def signal_strength():
+    """Get current signal strength"""
+    rssi, quality, status = get_signal_strength()
+    
+    if rssi is not None:
+        return jsonify({
+            'status': 'success',
+            'rssi': rssi,
+            'quality': quality
+        }), 200
+    else:
+        return jsonify({
+            'status': 'error',
+            'message': status
+        }), 500
 
 @app.route('/api/modem/get-sca', methods=['GET'])
 def get_sca():
