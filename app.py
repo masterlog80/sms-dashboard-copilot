@@ -53,7 +53,7 @@ def init_modem():
     
     try:
         log_message(f"[MODEM] Port exists, opening {modem_port}...")
-        modem = serial.Serial(modem_port, modem_baudrate, timeout=1)
+        modem = serial.Serial(modem_port, modem_baudrate, timeout=2)
         log_message(f"[MODEM] Port opened successfully")
         time.sleep(2)
         
@@ -64,7 +64,7 @@ def init_modem():
         # Test modem with AT command
         log_message("[MODEM] Sending AT command...")
         modem.write(b'AT\r\n')
-        time.sleep(1)
+        time.sleep(0.5)
         response = modem.read(100)
         log_message(f"[MODEM] Response: {response}")
         
@@ -78,18 +78,12 @@ def init_modem():
             response = modem.read(100)
             log_message(f"[MODEM] Text mode response: {response}")
             
-            # Try to enable unsolicited result codes (ignore errors)
-            log_message("[MODEM] Enabling SMS notifications...")
-            modem.write(b'AT+CNMI=1,1,0,1\r\n')
+            # Set SMS storage to SIM card (SM)
+            log_message("[MODEM] Setting SMS storage to SIM card...")
+            modem.write(b'AT+CPMS="SM","SM","SR"\r\n')
             time.sleep(0.5)
-            response = modem.read(100)
-            log_message(f"[MODEM] CNMI response: {response}")
-            
-            # Enable new message indication
-            log_message("[MODEM] Setting new message indication...")
-            modem.write(b'AT+CMGF=1\r\n')
-            time.sleep(0.5)
-            response = modem.read(100)
+            response = modem.read(200)
+            log_message(f"[MODEM] Storage response: {response}")
             
             modem_connected = True
             log_message("[MODEM] ✓ Modem fully initialized")
@@ -109,38 +103,48 @@ def init_modem():
         modem_connected = False
         return False
 
-def read_sms_from_storage():
-    """Periodically check SMS storage for new messages"""
+def read_sms_from_sim():
+    """Read SMS from SIM card storage"""
     global modem
     
     try:
         if modem is None or not modem_connected:
             return
         
-        # List all SMS in inbox (1 = inbox)
-        modem.write(b'AT+CMGL="REC UNREAD"\r\n')
-        time.sleep(0.5)
+        # List all SMS from SIM card
+        log_message("[RECEIVER] Querying SMS from SIM card...")
+        modem.write(b'AT+CMGL="ALL"\r\n')
+        time.sleep(1)
         
-        response = modem.read(500)
+        response = modem.read(2000)
         response_str = response.decode('utf-8', errors='ignore')
         
+        log_message(f"[RECEIVER] Raw response length: {len(response_str)}")
+        
         if '+CMGL:' in response_str:
-            log_message(f"[RECEIVER] Raw response: {response_str}")
+            log_message(f"[RECEIVER] Found SMS in response")
+            log_message(f"[RECEIVER] Raw response: {response_str[:500]}")
             
             # Parse messages
             lines = response_str.split('\r\n')
             i = 0
+            found_new = False
+            
             while i < len(lines):
                 line = lines[i]
                 
                 if '+CMGL:' in line:
                     try:
-                        # Format: +CMGL: <id>,<stat>,"<oa/da>","<alpha>",<scts>
-                        # Example: +CMGL: 1,0,"+1234567890","",2026/03/11,12:25:38+00
+                        # Format: +CMGL: <id>,<stat>,"<oa/da>","<alpha>",<scts>[,<tooa>,<length>]
+                        # Example: +CMGL: 1,0,"+1234567890","",26/03/11,12:25:38+00,145
+                        log_message(f"[RECEIVER] Parsing line: {line}")
+                        
+                        # Extract message ID and phone number
                         parts = line.split(',')
                         
                         if len(parts) >= 3:
                             msg_id = parts[0].split(':')[1].strip()
+                            stat = parts[1].strip()
                             phone = parts[2].strip().strip('"')
                             
                             # Message text is on next line
@@ -164,32 +168,34 @@ def read_sms_from_storage():
                                     }
                                     
                                     messages['received'].append(message)
-                                    log_message(f"[RECEIVER] ✓ SMS received from {phone}: {message_text}")
-                                    
-                                    # Delete message from modem
-                                    modem.write(f'AT+CMGD={msg_id}\r\n'.encode())
-                                    time.sleep(0.3)
-                                    modem.read(100)
+                                    log_message(f"[RECEIVER] ✓ NEW SMS from {phone}: {message_text}")
+                                    found_new = True
                     except Exception as e:
-                        log_message(f"[RECEIVER] Error parsing line: {str(e)}")
+                        log_message(f"[RECEIVER] Error parsing line '{line}': {str(e)}")
                 
                 i += 1
+            
+            if not found_new:
+                log_message(f"[RECEIVER] No new SMS found (already stored or no messages)")
+        else:
+            log_message(f"[RECEIVER] No +CMGL: in response (no messages or error)")
+            
     except Exception as e:
         log_message(f"[RECEIVER ERROR] {str(e)}")
 
 def receive_sms_loop():
-    """Continuously poll for incoming SMS"""
+    """Continuously poll for incoming SMS from SIM card"""
     global modem, stop_receiver
     
     log_message("[RECEIVER] SMS receiver thread started")
     
     while not stop_receiver and modem_connected:
         try:
-            read_sms_from_storage()
-            time.sleep(2)  # Check every 2 seconds
+            read_sms_from_sim()
+            time.sleep(3)  # Check every 3 seconds
         except Exception as e:
             log_message(f"[RECEIVER ERROR] {str(e)}")
-            time.sleep(2)
+            time.sleep(3)
     
     log_message("[RECEIVER] SMS receiver thread stopped")
 
