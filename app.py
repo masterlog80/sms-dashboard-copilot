@@ -386,6 +386,30 @@ def delete_sms_from_modem(modem_ids):
         log_message(f"[DELETE ERROR] {str(e)}")
         return False, str(e)
 
+def clear_sim_storage():
+    """Delete all SMS from modem SIM card storage"""
+    global modem
+    
+    try:
+        if modem is None or not modem_connected:
+            return False, "Modem not connected"
+        
+        log_message(f"[CLEAR] Deleting all SMS from SIM card...")
+        modem.write(b'AT+CMGD=1,4\r\n')  # Delete all messages
+        time.sleep(1)
+        response = modem.read(200)
+        log_message(f"[CLEAR] Response: {response}")
+        
+        if b'OK' in response:
+            log_message(f"[CLEAR] ✓ All SMS deleted from SIM card")
+            return True, "SIM storage cleared"
+        else:
+            log_message(f"[CLEAR] ✗ Failed to clear SIM storage")
+            return False, "Failed to clear SIM storage"
+    except Exception as e:
+        log_message(f"[CLEAR ERROR] {str(e)}")
+        return False, str(e)
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -496,6 +520,41 @@ def delete_message(message_index):
         
     except Exception as e:
         log_message(f"[API ERROR] Delete failed: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/clear-sim-storage', methods=['POST'])
+def clear_sim_storage_api():
+    """Clear all SMS from SIM card storage and dashboard"""
+    try:
+        log_message(f"[API] Clear SIM storage request")
+        
+        # Delete all from modem
+        success, status = clear_sim_storage()
+        
+        if success:
+            # Also clear the in-memory storage
+            messages['sent'].clear()
+            messages['received'].clear()
+            sms_modem_indices.clear()
+            pending_parts.clear()
+            processed_messages.clear()
+            
+            log_message(f"[API] ✓ SIM storage and dashboard cleared")
+            return jsonify({
+                'status': 'success',
+                'message': 'SIM storage and dashboard cleared successfully'
+            }), 200
+        else:
+            log_message(f"[API] ✗ Failed to clear SIM storage: {status}")
+            return jsonify({
+                'status': 'error',
+                'message': status
+            }), 500
+    except Exception as e:
+        log_message(f"[API ERROR] Clear storage failed: {str(e)}")
         return jsonify({
             'status': 'error',
             'message': str(e)
