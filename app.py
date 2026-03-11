@@ -176,7 +176,7 @@ def read_sms_from_sim():
                             # Reconstruct timestamp
                             timestamp_part = parts[4].strip().strip('"')
                             
-                            # Skip if we've already processed this message
+                            # Check if this specific message ID was already processed
                             if msg_id in processed_messages:
                                 log_message(f"[RECEIVER] Message {msg_id} already processed, skipping")
                                 i += 1
@@ -205,53 +205,62 @@ def read_sms_from_sim():
                                     
                                     processed_messages.add(msg_id)
                                     log_message(f"[RECEIVER] Part {len(sms_parts[msg_key])} from {phone}: {decoded_text[:30]}...")
+                                    
+                                    # Try to store combined message immediately
+                                    try_combine_and_store_message(msg_key)
                     except Exception as e:
                         log_message(f"[RECEIVER] Error parsing line '{line}': {str(e)}")
                 
                 i += 1
-            
-            # Now combine multi-part messages and store them
-            for msg_key, parts_list in list(sms_parts.items()):
-                # Sort parts by order
-                parts_list.sort(key=lambda x: x['order'])
-                
-                # Check if we have all parts (this is a heuristic - we assume a message is complete after no new parts)
-                # For now, just combine what we have
-                combined_text = ''.join([p['text'] for p in parts_list])
-                phone, timestamp_part = msg_key
-                
-                # Check if we already have this combined message
-                already_stored = any(
-                    m['phone'] == phone and m['message'] == combined_text 
-                    for m in messages['received']
-                )
-                
-                if not already_stored and combined_text:
-                    # Store combined message
-                    message = {
-                        'type': 'received',
-                        'phone': phone,
-                        'message': combined_text,
-                        'timestamp': datetime.now().isoformat(),
-                        'status': 'received'
-                    }
-                    
-                    msg_index = len(messages['received'])
-                    messages['received'].append(message)
-                    
-                    # Store all part IDs for deletion
-                    part_ids = [p['id'] for p in parts_list]
-                    sms_modem_indices[msg_index] = part_ids
-                    
-                    log_message(f"[RECEIVER] ✓ COMBINED SMS from {phone} ({len(parts_list)} parts): {combined_text[:50]}")
-                    
-                    # Remove from sms_parts since we've stored it
-                    del sms_parts[msg_key]
         else:
             log_message(f"[RECEIVER] No +CMGL: in response (no messages or error)")
             
     except Exception as e:
         log_message(f"[RECEIVER ERROR] {str(e)}")
+
+def try_combine_and_store_message(msg_key):
+    """Try to combine and store a multi-part message"""
+    global sms_parts, sms_modem_indices
+    
+    if msg_key not in sms_parts:
+        return
+    
+    parts_list = sms_parts[msg_key]
+    phone, timestamp_part = msg_key
+    
+    # Sort parts by order
+    parts_list.sort(key=lambda x: x['order'])
+    
+    # Combine text
+    combined_text = ''.join([p['text'] for p in parts_list])
+    
+    # Check if we already have this combined message
+    already_stored = any(
+        m['phone'] == phone and m['message'] == combined_text 
+        for m in messages['received']
+    )
+    
+    if not already_stored and combined_text:
+        # Store combined message
+        message = {
+            'type': 'received',
+            'phone': phone,
+            'message': combined_text,
+            'timestamp': datetime.now().isoformat(),
+            'status': 'received'
+        }
+        
+        msg_index = len(messages['received'])
+        messages['received'].append(message)
+        
+        # Store all part IDs for deletion
+        part_ids = [p['id'] for p in parts_list]
+        sms_modem_indices[msg_index] = part_ids
+        
+        log_message(f"[RECEIVER] ✓ COMBINED SMS from {phone} ({len(parts_list)} parts): {combined_text[:50]}")
+        
+        # Remove from sms_parts since we've stored it
+        del sms_parts[msg_key]
 
 def receive_sms_loop():
     """Continuously poll for incoming SMS from SIM card"""
