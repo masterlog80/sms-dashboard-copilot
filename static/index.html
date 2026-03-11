@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SMS Dashboard</title>
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 16px; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ──────────────────────────────────────────────────── */
+    header {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      border-bottom: 1px solid #334155;
+      padding: 1rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .brand { display: flex; align-items: center; gap: 0.75rem; }
+    .brand svg { width: 2rem; height: 2rem; flex-shrink: 0; }
+    .brand h1 { font-size: 1.4rem; font-weight: 700; color: #f1f5f9; letter-spacing: -0.02em; }
+    .brand span { color: #38bdf8; }
+
+    /* ── Stats bar ───────────────────────────────────────────────── */
+    .stats-bar {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .stat-pill {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 9999px;
+      padding: 0.3rem 0.85rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .stat-pill .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #64748b;
+    }
+    .stat-pill.unread .dot { background: #38bdf8; }
+    .stat-pill.total .dot  { background: #a78bfa; }
+
+    /* ── Toolbar ─────────────────────────────────────────────────── */
+    .toolbar {
+      padding: 1rem 1.5rem;
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      flex-wrap: wrap;
+      background: #0f172a;
+      border-bottom: 1px solid #1e293b;
+    }
+    .search-wrap {
+      position: relative;
+      flex: 1;
+      min-width: 200px;
+    }
+    .search-wrap svg {
+      position: absolute;
+      left: 0.75rem;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 1rem; height: 1rem;
+      color: #64748b;
+      pointer-events: none;
+    }
+    #searchInput {
+      width: 100%;
+      padding: 0.55rem 0.75rem 0.55rem 2.25rem;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 0.5rem;
+      color: #e2e8f0;
+      font-size: 0.875rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    #searchInput:focus { border-color: #38bdf8; }
+    #searchInput::placeholder { color: #475569; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.55rem 1rem;
+      border: none;
+      border-radius: 0.5rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary { background: #0ea5e9; color: #fff; }
+    .btn-primary:hover { background: #38bdf8; }
+    .btn-ghost { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+    .btn-ghost:hover { background: #334155; color: #e2e8f0; }
+    .btn-danger { background: #ef4444; color: #fff; }
+    .btn-danger:hover { background: #f87171; }
+
+    .filter-select {
+      padding: 0.55rem 0.75rem;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 0.5rem;
+      color: #e2e8f0;
+      font-size: 0.8rem;
+      outline: none;
+      cursor: pointer;
+    }
+    .filter-select:focus { border-color: #38bdf8; }
+
+    /* ── Main content ────────────────────────────────────────────── */
+    main {
+      flex: 1;
+      padding: 1.25rem 1.5rem;
+      max-width: 960px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    /* ── Empty / loading states ──────────────────────────────────── */
+    .state-message {
+      text-align: center;
+      padding: 4rem 1rem;
+      color: #475569;
+    }
+    .state-message svg { width: 3.5rem; height: 3.5rem; margin-bottom: 1rem; opacity: 0.4; }
+    .state-message p { font-size: 1.1rem; }
+
+    /* ── Message list ────────────────────────────────────────────── */
+    #messageList { display: flex; flex-direction: column; gap: 0.75rem; }
+
+    .message-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 0.75rem;
+      padding: 1rem 1.25rem;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 0.75rem;
+      align-items: start;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      cursor: default;
+    }
+    .message-card:hover {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 1px #38bdf820;
+    }
+    .message-card.unread { border-left: 3px solid #38bdf8; }
+
+    /* Avatar */
+    .avatar {
+      width: 2.4rem; height: 2.4rem;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #0ea5e9, #a78bfa);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 0.95rem;
+      color: #fff;
+      flex-shrink: 0;
+      margin-top: 0.1rem;
+    }
+
+    /* Body */
+    .msg-body { min-width: 0; }
+    .msg-header { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.3rem; }
+    .msg-sender { font-weight: 700; color: #f1f5f9; font-size: 0.9rem; }
+    .badge-unread {
+      background: #0ea5e9;
+      color: #fff;
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 0.1rem 0.45rem;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .msg-content {
+      color: #cbd5e1;
+      font-size: 0.875rem;
+      line-height: 1.55;
+      word-break: break-word;
+    }
+    .msg-content.truncated { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* Actions */
+    .msg-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      align-items: flex-end;
+      flex-shrink: 0;
+    }
+    .msg-time { font-size: 0.72rem; color: #64748b; white-space: nowrap; }
+    .action-row { display: flex; gap: 0.35rem; }
+    .icon-btn {
+      background: transparent;
+      border: 1px solid #334155;
+      border-radius: 0.4rem;
+      padding: 0.25rem 0.5rem;
+      color: #64748b;
+      cursor: pointer;
+      font-size: 0.75rem;
+      transition: background 0.12s, color 0.12s;
+      display: flex; align-items: center; gap: 0.25rem;
+    }
+    .icon-btn:hover { background: #334155; color: #e2e8f0; }
+    .icon-btn.danger:hover { background: #450a0a; border-color: #ef4444; color: #f87171; }
+
+    /* ── Pagination ───────────────────────────────────────────────── */
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 1.25rem 0;
+      flex-wrap: wrap;
+    }
+    .page-info { font-size: 0.8rem; color: #64748b; }
+
+    /* ── Toast ───────────────────────────────────────────────────── */
+    #toastContainer {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      z-index: 9999;
+    }
+    .toast {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 0.5rem;
+      padding: 0.65rem 1rem;
+      font-size: 0.8rem;
+      color: #e2e8f0;
+      max-width: 320px;
+      animation: slideIn 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .toast.success { border-left: 3px solid #22c55e; }
+    .toast.error   { border-left: 3px solid #ef4444; }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(1rem); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    /* ── Footer ──────────────────────────────────────────────────── */
+    footer {
+      text-align: center;
+      padding: 0.75rem;
+      font-size: 0.72rem;
+      color: #334155;
+      border-top: 1px solid #1e293b;
+    }
+
+    /* ── Responsive ──────────────────────────────────────────────── */
+    @media (max-width: 600px) {
+      header { padding: 0.75rem 1rem; }
+      .toolbar { padding: 0.75rem 1rem; }
+      main { padding: 1rem; }
+      .message-card { grid-template-columns: auto 1fr; }
+      .msg-actions { grid-column: 2; flex-direction: row; align-items: center; justify-content: space-between; }
+      .brand h1 { font-size: 1.1rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────── -->
+<header>
+  <div class="brand">
+    <!-- SMS icon -->
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:#38bdf8">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    </svg>
+    <h1>SMS <span>Dashboard</span></h1>
+  </div>
+  <div class="stats-bar">
+    <div class="stat-pill total">
+      <span class="dot"></span>
+      <span id="statTotal">0</span> total
+    </div>
+    <div class="stat-pill unread">
+      <span class="dot"></span>
+      <span id="statUnread">0</span> unread
+    </div>
+    <div class="stat-pill">
+      <span class="dot" style="background:#22c55e"></span>
+      <span id="statStatus">connecting…</span>
+    </div>
+  </div>
+</header>
+
+<!-- ── Toolbar ─────────────────────────────────────────────────────── -->
+<div class="toolbar">
+  <div class="search-wrap">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+    </svg>
+    <input id="searchInput" type="text" placeholder="Search messages or senders…" autocomplete="off" />
+  </div>
+  <select class="filter-select" id="filterSelect">
+    <option value="all">All messages</option>
+    <option value="unread">Unread only</option>
+    <option value="read">Read only</option>
+  </select>
+  <button class="btn btn-primary" id="btnRefresh">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+    </svg>
+    Refresh
+  </button>
+  <button class="btn btn-ghost" id="btnMarkAllRead">Mark all read</button>
+</div>
+
+<!-- ── Message list ─────────────────────────────────────────────────── -->
+<main>
+  <div id="loadingState" class="state-message">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/>
+      <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/>
+      <line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/>
+      <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/>
+    </svg>
+    <p>Loading messages…</p>
+  </div>
+  <div id="emptyState" class="state-message" style="display:none">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    </svg>
+    <p id="emptyText">No messages yet</p>
+  </div>
+  <div id="messageList"></div>
+  <div class="pagination" id="pagination" style="display:none">
+    <button class="btn btn-ghost" id="btnPrev">← Prev</button>
+    <span class="page-info" id="pageInfo"></span>
+    <button class="btn btn-ghost" id="btnNext">Next →</button>
+  </div>
+</main>
+
+<!-- ── Footer ──────────────────────────────────────────────────────── -->
+<footer>SMS Dashboard · running on <span id="footerPort">–</span></footer>
+
+<!-- ── Toast container ─────────────────────────────────────────────── -->
+<div id="toastContainer"></div>
+
+<script>
+/* ── Config ──────────────────────────────────────────────────────── */
+const API_BASE   = '';   // same-origin; change to e.g. 'http://localhost:5000' for dev
+const PAGE_SIZE  = 20;
+const AUTO_REFRESH_MS = 30_000;
+
+/* ── State ───────────────────────────────────────────────────────── */
+let currentPage  = 0;
+let currentTotal = 0;
+let searchQuery  = '';
+let filterMode   = 'all';   // 'all' | 'unread' | 'read'
+let autoRefreshTimer = null;
+
+/* ── Helpers ─────────────────────────────────────────────────────── */
+function toast(msg, type = 'success') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toastContainer').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+function avatarLetter(sender) {
+  const clean = sender.replace(/[^a-zA-Z0-9]/g, '');
+  return clean ? clean[0].toUpperCase() : '#';
+}
+
+function formatDate(iso) {
+  if (!iso) return '–';
+  try {
+    const d = new Date(iso);
+    const now = new Date();
+    const diffMs = now - d;
+    const diffMins = Math.floor(diffMs / 60_000);
+    if (diffMins < 1)   return 'just now';
+    if (diffMins < 60)  return `${diffMins}m ago`;
+    const diffHrs = Math.floor(diffMins / 60);
+    if (diffHrs < 24)   return `${diffHrs}h ago`;
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch { return iso; }
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/* ── API calls ───────────────────────────────────────────────────── */
+async function apiFetch(path, options = {}) {
+  const res = await fetch(API_BASE + path, options);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+async function loadStats() {
+  try {
+    const data = await apiFetch('/api/stats');
+    document.getElementById('statTotal').textContent  = data.total;
+    document.getElementById('statUnread').textContent = data.unread;
+    document.getElementById('statStatus').textContent = 'online';
+    document.getElementById('footerPort').textContent = data.serial_port || '–';
+  } catch {
+    document.getElementById('statStatus').textContent = 'offline';
+  }
+}
+
+async function loadMessages() {
+  const unreadOnly = filterMode === 'unread' ? '&unread=1' : '';
+  const offset = currentPage * PAGE_SIZE;
+  try {
+    const data = await apiFetch(
+      `/api/messages?limit=${PAGE_SIZE}&offset=${offset}${unreadOnly}`
+    );
+    currentTotal = data.total;
+
+    let messages = data.messages;
+
+    // Client-side filter for "read only"
+    if (filterMode === 'read') {
+      messages = messages.filter(m => m.read === 1);
+    }
+
+    // Client-side search
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      messages = messages.filter(m =>
+        m.sender.toLowerCase().includes(q) || m.content.toLowerCase().includes(q)
+      );
+    }
+
+    renderMessages(messages, data.total);
+  } catch (err) {
+    document.getElementById('loadingState').style.display = 'none';
+    document.getElementById('emptyState').style.display   = 'block';
+    document.getElementById('emptyText').textContent = 'Failed to load messages. Is the server running?';
+    console.error(err);
+  }
+}
+
+/* ── Render ──────────────────────────────────────────────────────── */
+function renderMessages(messages, total) {
+  const list     = document.getElementById('messageList');
+  const loading  = document.getElementById('loadingState');
+  const empty    = document.getElementById('emptyState');
+  const pager    = document.getElementById('pagination');
+
+  loading.style.display = 'none';
+
+  if (messages.length === 0) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    document.getElementById('emptyText').textContent =
+      searchQuery ? 'No messages match your search.' : 'No messages yet.';
+    pager.style.display = 'none';
+    return;
+  }
+
+  empty.style.display = 'none';
+  list.innerHTML = messages.map(renderCard).join('');
+
+  // Pagination
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  if (totalPages > 1) {
+    pager.style.display = 'flex';
+    const start = currentPage * PAGE_SIZE + 1;
+    const end   = Math.min(start + messages.length - 1, total);
+    document.getElementById('pageInfo').textContent =
+      `${start}–${end} of ${total}`;
+    document.getElementById('btnPrev').disabled = currentPage === 0;
+    document.getElementById('btnNext').disabled = currentPage >= totalPages - 1;
+  } else {
+    pager.style.display = 'none';
+  }
+}
+
+function renderCard(msg) {
+  const id       = parseInt(msg.id, 10);   // ensure integer
+  const letter   = avatarLetter(msg.sender);
+  const timeStr  = formatDate(msg.received);
+  const unread   = msg.read === 0;
+  const content  = escapeHtml(msg.content);
+  const sender   = escapeHtml(msg.sender);
+
+  return `
+  <div class="message-card ${unread ? 'unread' : ''}" data-id="${id}">
+    <div class="avatar">${escapeHtml(letter)}</div>
+    <div class="msg-body">
+      <div class="msg-header">
+        <span class="msg-sender">${sender}</span>
+        ${unread ? '<span class="badge-unread">New</span>' : ''}
+      </div>
+      <div class="msg-content truncated" title="${content}">${content}</div>
+    </div>
+    <div class="msg-actions">
+      <span class="msg-time">${escapeHtml(timeStr)}</span>
+      <div class="action-row">
+        ${unread ? `<button class="icon-btn" data-action="read" data-id="${id}" title="Mark as read">✓ Read</button>` : ''}
+        <button class="icon-btn danger" data-action="delete" data-id="${id}" title="Delete">✕</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ── Actions ─────────────────────────────────────────────────────── */
+async function markRead(id) {
+  try {
+    await apiFetch(`/api/messages/${id}/read`, { method: 'POST' });
+    toast('Marked as read');
+    refresh();
+  } catch { toast('Failed to update message', 'error'); }
+}
+
+async function deleteMsg(id) {
+  try {
+    await apiFetch(`/api/messages/${id}`, { method: 'DELETE' });
+    toast('Message deleted');
+    refresh();
+  } catch { toast('Failed to delete message', 'error'); }
+}
+
+async function markAllRead() {
+  try {
+    const data = await apiFetch('/api/messages?limit=200&unread=1');
+    await Promise.all(
+      data.messages.map(m => apiFetch(`/api/messages/${m.id}/read`, { method: 'POST' }))
+    );
+    toast(`Marked ${data.messages.length} message(s) as read`);
+    refresh();
+  } catch { toast('Failed to mark messages as read', 'error'); }
+}
+
+function refresh() {
+  loadStats();
+  loadMessages();
+}
+
+/* ── Auto-refresh ────────────────────────────────────────────────── */
+function startAutoRefresh() {
+  clearInterval(autoRefreshTimer);
+  autoRefreshTimer = setInterval(refresh, AUTO_REFRESH_MS);
+}
+
+/* ── Event listeners ─────────────────────────────────────────────── */
+document.getElementById('btnRefresh').addEventListener('click', () => {
+  currentPage = 0;
+  refresh();
+});
+
+document.getElementById('btnMarkAllRead').addEventListener('click', markAllRead);
+
+document.getElementById('filterSelect').addEventListener('change', e => {
+  filterMode  = e.target.value;
+  currentPage = 0;
+  loadMessages();
+});
+
+let searchTimer;
+document.getElementById('searchInput').addEventListener('input', e => {
+  searchQuery = e.target.value.trim();
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { currentPage = 0; loadMessages(); }, 300);
+});
+
+document.getElementById('btnPrev').addEventListener('click', () => {
+  if (currentPage > 0) { currentPage--; loadMessages(); }
+});
+document.getElementById('btnNext').addEventListener('click', () => {
+  if ((currentPage + 1) * PAGE_SIZE < currentTotal) { currentPage++; loadMessages(); }
+});
+
+// Event delegation for message card buttons (avoids inline onclick and XSS)
+document.getElementById('messageList').addEventListener('click', e => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const id = parseInt(btn.dataset.id, 10);
+  if (!Number.isFinite(id)) return;
+  if (btn.dataset.action === 'read')   markRead(id);
+  if (btn.dataset.action === 'delete') deleteMsg(id);
+});
+
+/* ── Boot ────────────────────────────────────────────────────────── */
+refresh();
+startAutoRefresh();
+</script>
+</body>
+</html>

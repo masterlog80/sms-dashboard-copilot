@@ -1,0 +1,53 @@
+version: "3.9"
+
+services:
+  sms-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sms-dashboard:latest
+    container_name: sms-dashboard
+    restart: unless-stopped
+
+    # ── Serial device access ──────────────────────────────────────────
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+    # Required for device access on some hosts
+    privileged: false
+    group_add:
+      - dialout
+
+    # ── Port mapping ──────────────────────────────────────────────────
+    ports:
+      - "${SMS_DASHBOARD_PORT:-8080}:5000"
+
+    # ── Persistent data ───────────────────────────────────────────────
+    volumes:
+      - sms-data:/data
+
+    # ── Environment ───────────────────────────────────────────────────
+    environment:
+      SERIAL_PORT: ${SERIAL_PORT:-/dev/ttyUSB0}
+      SERIAL_BAUD: ${SERIAL_BAUD:-9600}
+      DB_PATH: /data/sms.db
+      STATIC_DIR: /app/static
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+    # ── Healthcheck ───────────────────────────────────────────────────
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  sms-data:
+    driver: local
