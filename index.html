@@ -102,6 +102,7 @@
             border: 1px solid #ddd;
             border-radius: 5px;
             font-family: inherit;
+            box-sizing: border-box;
         }
         
         textarea {
@@ -119,6 +120,7 @@
             font-size: 1em;
             transition: background 0.3s;
             width: 100%;
+            box-sizing: border-box;
         }
         
         button:hover {
@@ -324,6 +326,7 @@
             font-size: 1.1em;
             margin-top: 5px;
             font-family: monospace;
+            word-break: break-all;
         }
         
         .sca-presets {
@@ -342,6 +345,8 @@
             border-radius: 3px;
             cursor: pointer;
             transition: all 0.2s;
+            width: 100%;
+            box-sizing: border-box;
         }
         
         .preset-btn:hover {
@@ -546,16 +551,20 @@
         
         // Load SCA
         function loadSCA() {
-            fetch('/api/modem/diagnose')
+            fetch('/api/modem/get-sca')
                 .then(response => response.json())
                 .then(data => {
-                    // The SCA will be logged, we need to fetch it via a dedicated endpoint
-                    // For now, we'll update it when the user checks
-                    setTimeout(() => {
-                        // Call diagnose in background to update the display
-                    }, 1000);
+                    if (data.status === 'success') {
+                        document.getElementById('sca-display').textContent = data.sca_number;
+                        document.getElementById('sca-input').placeholder = data.sca_number;
+                    } else {
+                        document.getElementById('sca-display').textContent = 'Unable to read';
+                    }
                 })
-                .catch(error => console.error('Error loading SCA:', error));
+                .catch(error => {
+                    console.error('Error loading SCA:', error);
+                    document.getElementById('sca-display').textContent = 'Error reading SCA';
+                });
         }
         
         // Set SCA Preset
@@ -589,6 +598,8 @@
                     document.getElementById('sca-display').textContent = scaNumber;
                     // Clear input
                     document.getElementById('sca-input').value = '';
+                    // Reload SCA to verify
+                    setTimeout(loadSCA, 1000);
                 } else {
                     showAlert(`❌ Error: ${data.message}`, 'error');
                 }
@@ -750,6 +761,11 @@
             loadStats();
             loadMessages();
         }, 5000);
+        
+        // Refresh SCA every 30 seconds
+        setInterval(() => {
+            loadSCA();
+        }, 30000);
     </script>
 </body>
 </html>
