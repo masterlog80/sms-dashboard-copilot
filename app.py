@@ -5,6 +5,7 @@ import serial
 import time
 from datetime import datetime
 import sys
+import threading
 
 app = Flask(__name__, template_folder='.')
 
@@ -35,6 +36,8 @@ modem = None
 modem_port = '/dev/ttyUSB0'
 modem_baudrate = 9600
 modem_connected = False
+receiver_thread = None
+stop_receiver = False
 
 def init_modem():
     """Initialize GSM modem connection"""
@@ -45,7 +48,6 @@ def init_modem():
     # Check if device exists
     if not os.path.exists(modem_port):
         log_message(f"[MODEM ERROR] Device {modem_port} does not exist")
-        log_message(f"[MODEM DEBUG] Available devices in /dev: {os.listdir('/dev')}")
         modem_connected = False
         return False
     
@@ -76,6 +78,13 @@ def init_modem():
             response = modem.read(100)
             log_message(f"[MODEM] Text mode response: {response}")
             
+            # Enable unsolicited result codes for new SMS
+            log_message("[MODEM] Enabling unsolicited SMS notifications...")
+            modem.write(b'AT+CNMI=2,1,0,1\r\n')
+            time.sleep(0.5)
+            response = modem.read(100)
+            log_message(f"[MODEM] CNMI response: {response}")
+            
             modem_connected = True
             log_message("[MODEM] ✓ Modem fully initialized")
             return True
@@ -93,6 +102,76 @@ def init_modem():
         log_message(f"[MODEM ERROR] {str(e)}")
         modem_connected = False
         return False
+
+def receive_sms_loop():
+    """Continuously listen for incoming SMS"""
+    global modem, stop_receiver
+    
+    log_message("[RECEIVER] SMS receiver thread started")
+    
+    while not stop_receiver and modem_connected:
+        try:
+            if modem and modem.in_waiting:
+                # Read incoming data
+                data = modem.read(modem.in_waiting)
+                log_message(f"[RECEIVER] Incoming data: {data}")
+                
+                # Parse incoming SMS
+                data_str = data.decode('utf-8', errors='ignore')
+                
+                # Check for +CMT (incoming SMS in text mode)
+                if '+CMT:' in data_str:
+                    log_message(f"[RECEIVER] SMS detected")
+                    
+                    # Parse phone number and message
+                    lines = data_str.split('\r\n')
+                    for i, line in enumerate(lines):
+                        if '+CMT:' in line:
+                            # Extract phone number from the line
+                            # Format: +CMT: "+1234567890","2026-03-11 03:25:00+00"
+                            try:
+                                parts = line.split(',')
+                                phone = parts[0].replace('+CMT:', '').strip().strip('"')
+                                
+                                # Get message text (next line)
+                                if i + 1 < len(lines):
+                                    message_text = lines[i + 1]
+                                    
+                                    # Store message
+                                    message = {
+                                        'type': 'received',
+                                        'phone': phone,
+                                        'message': message_text,
+                                        'timestamp': datetime.now().isoformat(),
+                                        'status': 'received'
+                                    }
+                                    
+                                    messages['received'].append(message)
+                                    log_message(f"[RECEIVER] ✓ SMS received from {phone}: {message_text}")
+                            except Exception as e:
+                                log_message(f"[RECEIVER] Error parsing SMS: {str(e)}")
+            
+            time.sleep(0.5)
+        except Exception as e:
+            log_message(f"[RECEIVER ERROR] {str(e)}")
+            time.sleep(1)
+    
+    log_message("[RECEIVER] SMS receiver thread stopped")
+
+def start_receiver():
+    """Start the SMS receiver thread"""
+    global receiver_thread, stop_receiver
+    
+    stop_receiver = False
+    receiver_thread = threading.Thread(target=receive_sms_loop, daemon=True)
+    receiver_thread.start()
+    log_message("[RECEIVER] Started receiver thread")
+
+def stop_receiver_thread():
+    """Stop the SMS receiver thread"""
+    global stop_receiver
+    stop_receiver = True
+    log_message("[RECEIVER] Stopping receiver thread...")
 
 def send_sms(phone, message_text):
     """Send SMS via GSM modem"""
@@ -234,9 +313,14 @@ if __name__ == '__main__':
     log_message(f"Modem Status: {'CONNECTED' if modem_connected else 'NOT CONNECTED'}")
     log_message("="*50)
     
+    # Start SMS receiver thread
+    if modem_connected:
+        start_receiver()
+    
     try:
         app.run(debug=False, host='0.0.0.0', port=5000)
     finally:
+        stop_receiver_thread()
         if modem:
             log_message("[MODEM] Closing connection...")
             modem.close()
