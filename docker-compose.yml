@@ -1,20 +1,7 @@
-version: '3.8'
-
+version: '3'
 services:
-  sms-dashboard:
-    build: .
-    image: sms-dashboard:latest
-    container_name: sms-dashboard
+  app:
+    image: your_image_name
     ports:
-      - "8080:5000"
-    devices:
-      - /dev/ttyUSB0:/dev/ttyUSB0
-    volumes:
-      - ./data:/app/data
-      - ./templates:/app/templates
-    environment:
-      - FLASK_ENV=production
-      - FLASK_APP=app.py
-    restart: unless-stopped
-    stdin_open: true
-    tty: true
+      - '5000:5000'
+    # Add other configurations here
