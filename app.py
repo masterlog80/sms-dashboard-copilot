@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 import sys
 import threading
+import re
 
 app = Flask(__name__, template_folder='.')
 
@@ -148,6 +149,32 @@ def init_modem():
         log_message(f"[MODEM ERROR] {str(e)}")
         modem_connected = False
         return False
+
+def get_sim_card_usage():
+    """Get SIM card storage usage from modem"""
+    global modem
+    
+    try:
+        if modem is None or not modem_connected:
+            return {'used': 0, 'total': 20}
+        
+        modem.write(b'AT+CPMS?\r\n')
+        time.sleep(0.5)
+        response = modem.read(200)
+        response_str = response.decode('utf-8', errors='ignore')
+        
+        # Parse: +CPMS: "SM",0,20,"SM",0,20,"SR",0,20
+        if '+CPMS:' in response_str:
+            # Extract numbers from response
+            numbers = re.findall(r'(\d+)', response_str)
+            if len(numbers) >= 2:
+                used = int(numbers[0])
+                total = int(numbers[1])
+                return {'used': used, 'total': total}
+    except:
+        pass
+    
+    return {'used': 0, 'total': 20}
 
 def read_sms_from_sim():
     """Read SMS from SIM card storage"""
@@ -428,12 +455,16 @@ def index():
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
+    # Get SIM card usage
+    sim_usage = get_sim_card_usage()
+    
     return jsonify({
         'total_messages': len(messages['sent']) + len(messages['received']),
         'unread_messages': len(messages['received']),
         'sent_messages': len(messages['sent']),
         'received_messages': len(messages['received']),
-        'modem_connected': modem_connected
+        'modem_connected': modem_connected,
+        'sim_usage': sim_usage
     })
 
 @app.route('/api/messages', methods=['GET'])
