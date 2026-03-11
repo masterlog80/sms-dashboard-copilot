@@ -199,6 +199,32 @@ def diagnose_modem():
             log_message(f"[DIAG ERROR] {str(e)}")
             return f"Diagnosis error: {str(e)}"
 
+def set_sms_service_center(sca_number):
+    """Set SMS Service Center"""
+    global modem
+    
+    with modem_lock:
+        try:
+            if modem is None or not modem_connected:
+                return False, "Modem not connected"
+            
+            log_message(f"[SCA] Setting SMS Service Center to {sca_number}...")
+            cmd = f'AT+CSCA="{sca_number}",145\r\n'
+            modem.write(cmd.encode())
+            time.sleep(1)
+            response = modem.read(100)
+            log_message(f"[SCA] Response: {response}")
+            
+            if b'OK' in response:
+                log_message(f"[SCA] ✓ SMS Service Center set successfully")
+                return True, "SMS Service Center updated"
+            else:
+                log_message(f"[SCA] ✗ Failed to set SMS Service Center")
+                return False, "Failed to set SMS Service Center"
+        except Exception as e:
+            log_message(f"[SCA ERROR] {str(e)}")
+            return False, str(e)
+
 def get_sim_card_usage():
     """Get SIM card storage usage from modem"""
     global modem
@@ -702,6 +728,36 @@ def diagnose():
     """Run modem diagnostics"""
     result = diagnose_modem()
     return jsonify({'status': 'ok', 'message': result})
+
+@app.route('/api/modem/set-sca', methods=['POST'])
+def set_sca():
+    """Set SMS Service Center"""
+    try:
+        data = request.json
+        sca_number = data.get('sca_number')
+        
+        if not sca_number:
+            return jsonify({'status': 'error', 'message': 'SCA number required'}), 400
+        
+        log_message(f"[API] Set SCA request: {sca_number}")
+        success, status = set_sms_service_center(sca_number)
+        
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': status
+            }), 200
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': status
+            }), 500
+    except Exception as e:
+        log_message(f"[API ERROR] Set SCA failed: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 @app.route('/api/modem/status', methods=['GET'])
 def modem_status():
