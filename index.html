@@ -141,6 +141,10 @@
             border-radius: 5px;
             margin-bottom: 10px;
             border-left: 4px solid #667eea;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 10px;
         }
         
         .message-item.received {
@@ -149,6 +153,10 @@
         
         .message-item.sent {
             border-left-color: #2196f3;
+        }
+        
+        .message-content {
+            flex: 1;
         }
         
         .message-from {
@@ -168,11 +176,33 @@
         .message-text {
             color: #333;
             margin-bottom: 5px;
+            word-break: break-word;
         }
         
         .message-time {
             color: #999;
             font-size: 0.9em;
+        }
+        
+        .message-actions {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .delete-btn {
+            background: #f44336;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: background 0.3s;
+            width: auto;
+        }
+        
+        .delete-btn:hover {
+            background: #d32f2f;
         }
         
         .status {
@@ -231,6 +261,18 @@
             .stats {
                 flex-direction: column;
                 gap: 20px;
+            }
+            
+            .message-item {
+                flex-direction: column;
+            }
+            
+            .message-actions {
+                width: 100%;
+            }
+            
+            .delete-btn {
+                width: 100%;
             }
         }
     </style>
@@ -344,15 +386,43 @@
                         return;
                     }
                     
-                    messagesList.innerHTML = data.map(msg => `
+                    messagesList.innerHTML = data.map((msg, idx) => `
                         <div class="message-item ${msg.type}">
-                            <div class="message-from">${msg.type === 'sent' ? '📤' : '📥'} ${msg.phone}</div>
-                            <div class="message-text">${msg.message}</div>
-                            <div class="message-time">${new Date(msg.timestamp).toLocaleString()}</div>
+                            <div class="message-content">
+                                <div class="message-from">${msg.type === 'sent' ? '📤' : '📥'} ${msg.phone}</div>
+                                <div class="message-text">${msg.message}</div>
+                                <div class="message-time">${new Date(msg.timestamp).toLocaleString()}</div>
+                            </div>
+                            <div class="message-actions">
+                                <button class="delete-btn" onclick="deleteMessage(${idx})">🗑️ Delete</button>
+                            </div>
                         </div>
                     `).join('');
                 })
                 .catch(error => console.error('Error loading messages:', error));
+        }
+        
+        // Delete message
+        function deleteMessage(index) {
+            if (confirm('Are you sure you want to delete this message?')) {
+                fetch(`/api/message/${index}`, {
+                    method: 'DELETE'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        showAlert('✅ Message deleted!', 'success');
+                        loadStats();
+                        loadMessages();
+                    } else {
+                        showAlert('❌ Error deleting message', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showAlert('❌ Error deleting message', 'error');
+                });
+            }
         }
         
         // Show alert
