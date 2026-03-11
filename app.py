@@ -357,33 +357,68 @@ def send_sms(phone, message_text):
             # Clear buffer before sending
             modem.flushInput()
             modem.flushOutput()
-            time.sleep(0.2)
+            time.sleep(0.5)
             
             # Send SMS command
             log_message(f"[SMS] Sending CMGS command...")
             cmd = f'AT+CMGS="{phone}"\r\n'
             modem.write(cmd.encode())
-            time.sleep(1)
+            time.sleep(1.5)
             
             response = modem.read(100)
             log_message(f"[SMS] CMGS response: {response}")
             
             if b'>' in response:
                 log_message(f"[SMS] Modem ready, sending message...")
+                # Send message text
                 modem.write(message_text.encode())
                 time.sleep(0.5)
-                modem.write(b'\x1A')  # Ctrl+Z
-                time.sleep(2)
+                # Send Ctrl+Z to complete
+                modem.write(b'\x1A')
+                time.sleep(3)  # Wait longer for response
                 
-                response = modem.read(200)
+                # Read response
+                response = modem.read(500)
                 log_message(f"[SMS] Send response: {response}")
+                response_str = response.decode('utf-8', errors='ignore')
                 
+                # Check for success indicators
                 if b'+CMGS:' in response or b'OK' in response:
                     log_message(f"[SMS] ✓ Message sent successfully")
                     return True, "SMS sent successfully"
+                elif b'ERROR' in response or b'CMS ERROR' in response:
+                    # Extract error code if possible
+                    error_match = re.search(r'ERROR:\s*(\d+)', response_str)
+                    error_code = error_match.group(1) if error_match else "Unknown"
+                    log_message(f"[SMS] ✗ CMS Error {error_code}")
+                    
+                    # CMS ERROR 500 usually means device doesn't support feature
+                    # Try sending without fancy encoding
+                    log_message(f"[SMS] Retrying with basic encoding...")
+                    modem.flushInput()
+                    modem.flushOutput()
+                    time.sleep(0.5)
+                    
+                    # Try again
+                    modem.write(cmd.encode())
+                    time.sleep(1.5)
+                    response = modem.read(100)
+                    
+                    if b'>' in response:
+                        modem.write(message_text.encode('utf-8', errors='ignore'))
+                        time.sleep(0.5)
+                        modem.write(b'\x1A')
+                        time.sleep(3)
+                        response = modem.read(500)
+                        
+                        if b'+CMGS:' in response or b'OK' in response:
+                            log_message(f"[SMS] ✓ Message sent successfully on retry")
+                            return True, "SMS sent successfully"
+                    
+                    return False, f"SMS sending failed with error {error_code}"
                 else:
-                    log_message(f"[SMS] ✗ Unexpected response")
-                    return False, f"Unexpected modem response"
+                    log_message(f"[SMS] ✗ Unexpected response: {response_str}")
+                    return False, "Unexpected modem response"
             else:
                 log_message(f"[SMS] ✗ Modem not ready for message input")
                 return False, "Modem did not accept message command"
