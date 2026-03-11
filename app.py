@@ -25,6 +25,29 @@ def log_message(message):
     except:
         pass
 
+def try_decode_hex(text):
+    """Try to decode hex-encoded text"""
+    try:
+        # Check if it looks like hex (all hex characters)
+        if all(c in '0123456789ABCDEFabcdef' for c in text.strip()):
+            # Try UTF-16BE decoding (common for hex SMS)
+            decoded = bytes.fromhex(text).decode('utf-16-be', errors='ignore')
+            if decoded and len(decoded) > 0:
+                return decoded
+    except:
+        pass
+    
+    try:
+        # Try UTF-8 decoding
+        if all(c in '0123456789ABCDEFabcdef' for c in text.strip()):
+            decoded = bytes.fromhex(text).decode('utf-8', errors='ignore')
+            if decoded and len(decoded) > 0:
+                return decoded
+    except:
+        pass
+    
+    return text  # Return original if decoding fails
+
 # In-memory message storage
 messages = {
     'sent': [],
@@ -38,6 +61,7 @@ modem_baudrate = 9600
 modem_connected = False
 receiver_thread = None
 stop_receiver = False
+processed_messages = set()  # Track processed message IDs
 
 def init_modem():
     """Initialize GSM modem connection"""
@@ -105,15 +129,15 @@ def init_modem():
 
 def read_sms_from_sim():
     """Read SMS from SIM card storage"""
-    global modem
+    global modem, processed_messages
     
     try:
         if modem is None or not modem_connected:
             return
         
-        # List all SMS from SIM card
-        log_message("[RECEIVER] Querying SMS from SIM card...")
-        modem.write(b'AT+CMGL="ALL"\r\n')
+        # List unread SMS from SIM card
+        log_message("[RECEIVER] Querying unread SMS from SIM card...")
+        modem.write(b'AT+CMGL="REC UNREAD"\r\n')
         time.sleep(1)
         
         response = modem.read(2000)
@@ -123,7 +147,6 @@ def read_sms_from_sim():
         
         if '+CMGL:' in response_str:
             log_message(f"[RECEIVER] Found SMS in response")
-            log_message(f"[RECEIVER] Raw response: {response_str[:500]}")
             
             # Parse messages
             lines = response_str.split('\r\n')
@@ -136,7 +159,6 @@ def read_sms_from_sim():
                 if '+CMGL:' in line:
                     try:
                         # Format: +CMGL: <id>,<stat>,"<oa/da>","<alpha>",<scts>[,<tooa>,<length>]
-                        # Example: +CMGL: 1,0,"+1234567890","",26/03/11,12:25:38+00,145
                         log_message(f"[RECEIVER] Parsing line: {line}")
                         
                         # Extract message ID and phone number
@@ -147,28 +169,32 @@ def read_sms_from_sim():
                             stat = parts[1].strip()
                             phone = parts[2].strip().strip('"')
                             
+                            # Skip if we've already processed this message
+                            if msg_id in processed_messages:
+                                log_message(f"[RECEIVER] Message {msg_id} already processed, skipping")
+                                i += 1
+                                continue
+                            
                             # Message text is on next line
                             if i + 1 < len(lines):
                                 message_text = lines[i + 1].strip()
                                 
-                                # Check if we already have this message
-                                already_stored = any(
-                                    m['phone'] == phone and m['message'] == message_text 
-                                    for m in messages['received']
-                                )
+                                # Try to decode if it's hex
+                                decoded_text = try_decode_hex(message_text)
                                 
-                                if not already_stored and message_text:
+                                if decoded_text:
                                     # Store message
                                     message = {
                                         'type': 'received',
                                         'phone': phone,
-                                        'message': message_text,
+                                        'message': decoded_text,
                                         'timestamp': datetime.now().isoformat(),
                                         'status': 'received'
                                     }
                                     
                                     messages['received'].append(message)
-                                    log_message(f"[RECEIVER] ✓ NEW SMS from {phone}: {message_text}")
+                                    processed_messages.add(msg_id)
+                                    log_message(f"[RECEIVER] ✓ NEW SMS from {phone}: {decoded_text[:50]}")
                                     found_new = True
                     except Exception as e:
                         log_message(f"[RECEIVER] Error parsing line '{line}': {str(e)}")
@@ -176,7 +202,7 @@ def read_sms_from_sim():
                 i += 1
             
             if not found_new:
-                log_message(f"[RECEIVER] No new SMS found (already stored or no messages)")
+                log_message(f"[RECEIVER] No new unread SMS found")
         else:
             log_message(f"[RECEIVER] No +CMGL: in response (no messages or error)")
             
