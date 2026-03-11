@@ -54,6 +54,9 @@ messages = {
     'received': []
 }
 
+# Track modem SMS indices for deletion
+sms_modem_indices = {}  # Map of message index to modem message ID
+
 # GSM Modem setup
 modem = None
 modem_port = '/dev/ttyUSB0'
@@ -129,7 +132,7 @@ def init_modem():
 
 def read_sms_from_sim():
     """Read SMS from SIM card storage"""
-    global modem, processed_messages
+    global modem, processed_messages, sms_modem_indices
     
     try:
         if modem is None or not modem_connected:
@@ -192,7 +195,9 @@ def read_sms_from_sim():
                                         'status': 'received'
                                     }
                                     
+                                    msg_index = len(messages['received'])
                                     messages['received'].append(message)
+                                    sms_modem_indices[msg_index] = msg_id  # Store modem ID for deletion
                                     processed_messages.add(msg_id)
                                     log_message(f"[RECEIVER] ✓ NEW SMS from {phone}: {decoded_text[:50]}")
                                     found_new = True
@@ -284,6 +289,32 @@ def send_sms(phone, message_text):
         log_message(f"[SMS ERROR] {str(e)}")
         return False, f"Error sending SMS: {str(e)}"
 
+def delete_sms_from_modem(modem_id):
+    """Delete SMS from modem by ID"""
+    global modem
+    
+    try:
+        if modem is None or not modem_connected:
+            return False, "Modem not connected"
+        
+        log_message(f"[DELETE] Deleting SMS with ID {modem_id} from modem...")
+        cmd = f'AT+CMGD={modem_id}\r\n'
+        modem.write(cmd.encode())
+        time.sleep(0.5)
+        
+        response = modem.read(100)
+        log_message(f"[DELETE] Response: {response}")
+        
+        if b'OK' in response:
+            log_message(f"[DELETE] ✓ SMS {modem_id} deleted from modem")
+            return True, "SMS deleted"
+        else:
+            log_message(f"[DELETE] ✗ Failed to delete SMS {modem_id}")
+            return False, "Failed to delete SMS"
+    except Exception as e:
+        log_message(f"[DELETE ERROR] {str(e)}")
+        return False, str(e)
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -343,6 +374,57 @@ def send_message():
             }), 500
     except Exception as e:
         log_message(f"[API ERROR] {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/message/<int:message_index>', methods=['DELETE'])
+def delete_message(message_index):
+    """Delete a message from the list and modem"""
+    try:
+        log_message(f"[API] Delete request for message index {message_index}")
+        
+        # Find the message in the list
+        all_messages = messages['sent'] + messages['received']
+        all_messages.sort(key=lambda x: x['timestamp'], reverse=True)
+        
+        if message_index >= len(all_messages):
+            return jsonify({'status': 'error', 'message': 'Message not found'}), 404
+        
+        message = all_messages[message_index]
+        
+        # If it's a received message, try to delete from modem
+        if message['type'] == 'received':
+            # Find the modem ID
+            for idx, msg in enumerate(messages['received']):
+                if msg == message:
+                    if idx in sms_modem_indices:
+                        modem_id = sms_modem_indices[idx]
+                        success, status = delete_sms_from_modem(modem_id)
+                        if not success:
+                            log_message(f"[API] Warning: Failed to delete from modem but removing from list")
+                    
+                    # Remove from in-memory storage
+                    messages['received'].pop(idx)
+                    if idx in sms_modem_indices:
+                        del sms_modem_indices[idx]
+                    break
+        else:
+            # For sent messages, just remove from memory
+            for idx, msg in enumerate(messages['sent']):
+                if msg == message:
+                    messages['sent'].pop(idx)
+                    break
+        
+        log_message(f"[API] ✓ Message deleted")
+        return jsonify({
+            'status': 'success',
+            'message': 'Message deleted successfully'
+        }), 200
+        
+    except Exception as e:
+        log_message(f"[API ERROR] Delete failed: {str(e)}")
         return jsonify({
             'status': 'error',
             'message': str(e)
