@@ -29,20 +29,44 @@ def try_decode_hex(text):
     """Try to decode hex-encoded text"""
     try:
         # Check if it looks like hex (all hex characters)
-        if all(c in '0123456789ABCDEFabcdef' for c in text.strip()):
-            # Try UTF-16BE decoding (common for hex SMS)
-            decoded = bytes.fromhex(text).decode('utf-16-be', errors='ignore')
+        if not all(c in '0123456789ABCDEFabcdef' for c in text.strip()):
+            return text  # Not hex encoded
+        
+        hex_str = text.strip()
+        
+        # Try UCS2 decoding first (big-endian Unicode)
+        # UCS2 uses 4 hex chars per character (2 bytes)
+        try:
+            decoded = bytes.fromhex(hex_str).decode('utf-16-be', errors='ignore')
+            if decoded and len(decoded) > 5:  # Real text should be longer than 5 chars
+                return decoded
+        except:
+            pass
+        
+        # Try UTF-16BE decoding
+        try:
+            decoded = bytes.fromhex(hex_str).decode('utf-16-be', errors='ignore')
             if decoded and len(decoded) > 0:
                 return decoded
-    except:
-        pass
-    
-    try:
+        except:
+            pass
+        
         # Try UTF-8 decoding
-        if all(c in '0123456789ABCDEFabcdef' for c in text.strip()):
-            decoded = bytes.fromhex(text).decode('utf-8', errors='ignore')
+        try:
+            decoded = bytes.fromhex(hex_str).decode('utf-8', errors='ignore')
             if decoded and len(decoded) > 0:
                 return decoded
+        except:
+            pass
+        
+        # Try Latin-1 (ISO-8859-1) decoding
+        try:
+            decoded = bytes.fromhex(hex_str).decode('latin-1', errors='ignore')
+            if decoded and len(decoded) > 0:
+                return decoded
+        except:
+            pass
+        
     except:
         pass
     
