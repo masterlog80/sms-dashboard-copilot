@@ -199,6 +199,35 @@ def diagnose_modem():
             log_message(f"[DIAG ERROR] {str(e)}")
             return f"Diagnosis error: {str(e)}"
 
+def get_sms_service_center():
+    """Get current SMS Service Center"""
+    global modem
+    
+    with modem_lock:
+        try:
+            if modem is None or not modem_connected:
+                return None, "Modem not connected"
+            
+            modem.write(b'AT+CSCA?\r\n')
+            time.sleep(0.5)
+            response = modem.read(200)
+            response_str = response.decode('utf-8', errors='ignore')
+            
+            log_message(f"[CSCA] Response: {response_str}")
+            
+            # Parse: +CSCA: "+393935000001",145
+            if '+CSCA:' in response_str:
+                # Extract the phone number between quotes
+                match = re.search(r'\+CSCA:\s*"([^"]+)"', response_str)
+                if match:
+                    sca_number = match.group(1)
+                    log_message(f"[CSCA] Current SCA: {sca_number}")
+                    return sca_number, "OK"
+        except Exception as e:
+            log_message(f"[CSCA ERROR] {str(e)}")
+        
+        return None, "Unable to read SCA"
+
 def set_sms_service_center(sca_number):
     """Set SMS Service Center"""
     global modem
@@ -728,6 +757,22 @@ def diagnose():
     """Run modem diagnostics"""
     result = diagnose_modem()
     return jsonify({'status': 'ok', 'message': result})
+
+@app.route('/api/modem/get-sca', methods=['GET'])
+def get_sca():
+    """Get current SMS Service Center"""
+    sca_number, status = get_sms_service_center()
+    
+    if sca_number:
+        return jsonify({
+            'status': 'success',
+            'sca_number': sca_number
+        }), 200
+    else:
+        return jsonify({
+            'status': 'error',
+            'message': status
+        }), 500
 
 @app.route('/api/modem/set-sca', methods=['POST'])
 def set_sca():
