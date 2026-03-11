@@ -78,12 +78,18 @@ def init_modem():
             response = modem.read(100)
             log_message(f"[MODEM] Text mode response: {response}")
             
-            # Enable unsolicited result codes for new SMS
-            log_message("[MODEM] Enabling unsolicited SMS notifications...")
-            modem.write(b'AT+CNMI=2,1,0,1\r\n')
+            # Try to enable unsolicited result codes (ignore errors)
+            log_message("[MODEM] Enabling SMS notifications...")
+            modem.write(b'AT+CNMI=1,1,0,1\r\n')
             time.sleep(0.5)
             response = modem.read(100)
             log_message(f"[MODEM] CNMI response: {response}")
+            
+            # Enable new message indication
+            log_message("[MODEM] Setting new message indication...")
+            modem.write(b'AT+CMGF=1\r\n')
+            time.sleep(0.5)
+            response = modem.read(100)
             
             modem_connected = True
             log_message("[MODEM] ✓ Modem fully initialized")
@@ -103,40 +109,51 @@ def init_modem():
         modem_connected = False
         return False
 
-def receive_sms_loop():
-    """Continuously listen for incoming SMS"""
-    global modem, stop_receiver
+def read_sms_from_storage():
+    """Periodically check SMS storage for new messages"""
+    global modem
     
-    log_message("[RECEIVER] SMS receiver thread started")
-    
-    while not stop_receiver and modem_connected:
-        try:
-            if modem and modem.in_waiting:
-                # Read incoming data
-                data = modem.read(modem.in_waiting)
-                log_message(f"[RECEIVER] Incoming data: {data}")
+    try:
+        if modem is None or not modem_connected:
+            return
+        
+        # List all SMS in inbox (1 = inbox)
+        modem.write(b'AT+CMGL="REC UNREAD"\r\n')
+        time.sleep(0.5)
+        
+        response = modem.read(500)
+        response_str = response.decode('utf-8', errors='ignore')
+        
+        if '+CMGL:' in response_str:
+            log_message(f"[RECEIVER] Raw response: {response_str}")
+            
+            # Parse messages
+            lines = response_str.split('\r\n')
+            i = 0
+            while i < len(lines):
+                line = lines[i]
                 
-                # Parse incoming SMS
-                data_str = data.decode('utf-8', errors='ignore')
-                
-                # Check for +CMT (incoming SMS in text mode)
-                if '+CMT:' in data_str:
-                    log_message(f"[RECEIVER] SMS detected")
-                    
-                    # Parse phone number and message
-                    lines = data_str.split('\r\n')
-                    for i, line in enumerate(lines):
-                        if '+CMT:' in line:
-                            # Extract phone number from the line
-                            # Format: +CMT: "+1234567890","2026-03-11 03:25:00+00"
-                            try:
-                                parts = line.split(',')
-                                phone = parts[0].replace('+CMT:', '').strip().strip('"')
+                if '+CMGL:' in line:
+                    try:
+                        # Format: +CMGL: <id>,<stat>,"<oa/da>","<alpha>",<scts>
+                        # Example: +CMGL: 1,0,"+1234567890","",2026/03/11,12:25:38+00
+                        parts = line.split(',')
+                        
+                        if len(parts) >= 3:
+                            msg_id = parts[0].split(':')[1].strip()
+                            phone = parts[2].strip().strip('"')
+                            
+                            # Message text is on next line
+                            if i + 1 < len(lines):
+                                message_text = lines[i + 1].strip()
                                 
-                                # Get message text (next line)
-                                if i + 1 < len(lines):
-                                    message_text = lines[i + 1]
-                                    
+                                # Check if we already have this message
+                                already_stored = any(
+                                    m['phone'] == phone and m['message'] == message_text 
+                                    for m in messages['received']
+                                )
+                                
+                                if not already_stored and message_text:
                                     # Store message
                                     message = {
                                         'type': 'received',
@@ -148,13 +165,31 @@ def receive_sms_loop():
                                     
                                     messages['received'].append(message)
                                     log_message(f"[RECEIVER] ✓ SMS received from {phone}: {message_text}")
-                            except Exception as e:
-                                log_message(f"[RECEIVER] Error parsing SMS: {str(e)}")
-            
-            time.sleep(0.5)
+                                    
+                                    # Delete message from modem
+                                    modem.write(f'AT+CMGD={msg_id}\r\n'.encode())
+                                    time.sleep(0.3)
+                                    modem.read(100)
+                    except Exception as e:
+                        log_message(f"[RECEIVER] Error parsing line: {str(e)}")
+                
+                i += 1
+    except Exception as e:
+        log_message(f"[RECEIVER ERROR] {str(e)}")
+
+def receive_sms_loop():
+    """Continuously poll for incoming SMS"""
+    global modem, stop_receiver
+    
+    log_message("[RECEIVER] SMS receiver thread started")
+    
+    while not stop_receiver and modem_connected:
+        try:
+            read_sms_from_storage()
+            time.sleep(2)  # Check every 2 seconds
         except Exception as e:
             log_message(f"[RECEIVER ERROR] {str(e)}")
-            time.sleep(1)
+            time.sleep(2)
     
     log_message("[RECEIVER] SMS receiver thread stopped")
 
