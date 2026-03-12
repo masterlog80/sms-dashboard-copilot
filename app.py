@@ -251,7 +251,7 @@ def delete_sms_from_modem_async(modem_ids):
                     log_message(f"[DELETE] Response: {response}")
                     last_successful_command_time = time.time()
                 
-                log_message(f"[DELETE] ��� SMS deleted from modem")
+                log_message(f"[DELETE] ✓ SMS deleted from modem")
                 return True
             except Exception as e:
                 log_message(f"[DELETE ERROR] {str(e)}")
@@ -602,6 +602,9 @@ def read_sms_from_sim():
     """Read SMS from SIM card storage"""
     global modem, processed_messages, pending_parts, last_successful_command_time
     
+    # List to store pending async operations
+    async_operations = []
+    
     with modem_lock:
         try:
             if modem is None or not modem_connected:
@@ -678,8 +681,8 @@ def read_sms_from_sim():
                 log_message(f"[RECEIVER] No +CMGL: in response (no messages or error)")
             
             current_time = time.time()
-            keys_to_remove = []
             
+            # Find completed messages
             for msg_key, msg_data in list(pending_parts.items()):
                 parts_list = msg_data['parts']
                 modem_ids = msg_data['modem_ids']
@@ -709,39 +712,23 @@ def read_sms_from_sim():
                         log_message(f"[RECEIVER] ✓ COMBINED SMS from {phone} ({len(parts_list)} parts): {combined_text[:50]}")
                         log_message(f"[RECEIVER] Message stored locally, will be deleted from SIM card asynchronously")
                         
-                        # Release the modem lock before doing async operations
-                        keys_to_remove.append(msg_key)
-            
-            for key in keys_to_remove:
-                modem_ids = pending_parts[key]['modem_ids']
-                phone = key[0]
-                message = ''.join([p['text'] for p in pending_parts[key]['parts']])
-                del pending_parts[key]
-                
-                # Start async operations OUTSIDE the lock
+                        # Store async operation details
+                        async_operations.append({
+                            'phone': phone,
+                            'message': combined_text,
+                            'modem_ids': modem_ids
+                        })
+                        
+                        # Mark for deletion from pending_parts
+                        del pending_parts[msg_key]
+                        
         except Exception as e:
             log_message(f"[RECEIVER ERROR] {str(e)}")
-        
-        # Process deletions and email forwarding AFTER releasing the lock
-        for key in list(pending_parts.keys()):
-            if key not in pending_parts:  # Already processed above
-                continue
-        
-    # Now call async operations outside the lock
-    for msg_key in keys_to_remove:
-        if msg_key in pending_parts:
-            continue  # Already processed
-        modem_ids = pending_parts.get(msg_key, {}).get('modem_ids', [])
-        if not modem_ids:
-            continue
-        phone = msg_key[0]
-        combined_text = ''.join([p['text'] for p in pending_parts.get(msg_key, {}).get('parts', [])])
-        
-        # Start email forwarding in background thread
-        send_forwarding_email_async(phone, combined_text)
-        
-        # Start SMS deletion in background thread
-        delete_sms_from_modem_async(modem_ids)
+    
+    # Now execute async operations OUTSIDE the lock
+    for op in async_operations:
+        send_forwarding_email_async(op['phone'], op['message'])
+        delete_sms_from_modem_async(op['modem_ids'])
 
 def receive_sms_loop():
     """Continuously poll for incoming SMS from SIM card"""
