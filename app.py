@@ -11,6 +11,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import ssl
+import requests
 
 app = Flask(__name__, template_folder='.')
 
@@ -18,8 +19,9 @@ app = Flask(__name__, template_folder='.')
 log_file = '/app/data/modem.log'
 os.makedirs('/app/data', exist_ok=True)
 
-# Forwarding config file
+# Forwarding config files
 forwarding_config_file = '/app/data/forwarding_config.json'
+gatewayapi_config_file = '/app/data/gatewayapi_config.json'
 
 def log_message(message):
     """Log to both console and file"""
@@ -109,7 +111,6 @@ def load_forwarding_config():
     except Exception as e:
         log_message(f"[FORWARDING ERROR] Failed to load config: {str(e)}")
     
-    # Return default config
     return {
         'enabled': False,
         'sender_address': '',
@@ -135,6 +136,33 @@ def save_forwarding_config(config):
         log_message(f"[FORWARDING ERROR] Failed to save config: {str(e)}")
         return False
 
+def load_gatewayapi_config():
+    """Load Gatewayapi configuration"""
+    try:
+        if os.path.exists(gatewayapi_config_file):
+            with open(gatewayapi_config_file, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        log_message(f"[GATEWAYAPI ERROR] Failed to load config: {str(e)}")
+    
+    return {
+        'enabled': False,
+        'sender_id': '',
+        'api_token': '',
+        'destination_phone': ''
+    }
+
+def save_gatewayapi_config(config):
+    """Save Gatewayapi configuration"""
+    try:
+        with open(gatewayapi_config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+        log_message("[GATEWAYAPI] Configuration saved")
+        return True
+    except Exception as e:
+        log_message(f"[GATEWAYAPI ERROR] Failed to save config: {str(e)}")
+        return False
+
 def send_forwarding_email_async(phone, message):
     """Send email via SMTP with received SMS (async - non-blocking)"""
     def send_email():
@@ -147,7 +175,6 @@ def send_forwarding_email_async(phone, message):
             
             log_message(f"[FORWARDING] Starting async email send for SMS from {phone}")
             
-            # Prepare subject and body
             subject = config['subject'].replace('{phone}', phone).replace('{timestamp}', datetime.now().isoformat())
             body = f"""
 New SMS Received
@@ -162,14 +189,12 @@ Message:
 Sent by SMS Dashboard Copilot
 """
             
-            # Create message
             msg = MIMEMultipart()
             msg['From'] = f"{config['sender_name']} <{config['sender_address']}>"
             msg['To'] = config['destination_address']
             msg['Subject'] = subject
             msg.attach(MIMEText(body, 'plain'))
             
-            # Connect and send
             smtp_server = config['smtp_server']
             smtp_port = config['smtp_port']
             encryption = config['encryption']
@@ -199,11 +224,8 @@ Sent by SMS Dashboard Copilot
                         context.minimum_version = ssl.TLSVersion.TLSv1_3
                     server.starttls(context=context)
             
-            # Login
             log_message(f"[FORWARDING] Logging in as {username}")
             server.login(username, password)
-            
-            # Send
             server.send_message(msg)
             server.quit()
             
@@ -216,10 +238,70 @@ Sent by SMS Dashboard Copilot
             log_message(f"[FORWARDING ERROR] Traceback: {traceback.format_exc()}")
             return False
     
-    # Send email in separate thread to avoid blocking SMS reception
     email_thread = threading.Thread(target=send_email, daemon=True)
     email_thread.start()
     log_message("[FORWARDING] Email send thread started")
+
+def send_gatewayapi_sms_async(phone, message):
+    """Send SMS via Gatewayapi (async - non-blocking)"""
+    def send_sms():
+        try:
+            config = load_gatewayapi_config()
+            
+            if not config['enabled']:
+                log_message("[GATEWAYAPI] SMS forwarding is disabled, skipping")
+                return False
+            
+            log_message(f"[GATEWAYAPI] Starting async SMS send for message from {phone}")
+            
+            sender_id = config['sender_id']
+            api_token = config['api_token']
+            destination_phone = config['destination_phone']
+            
+            # Prepare the message for Gatewayapi
+            sms_message = f"SMS from {phone}:\n{message}"
+            
+            # Gatewayapi endpoint
+            url = "https://gatewayapi.com/rest/mtsms"
+            
+            headers = {
+                'Authorization': f'Bearer {api_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            payload = {
+                'sender': sender_id,
+                'recipients': [
+                    {
+                        'msisdn': destination_phone
+                    }
+                ],
+                'message': sms_message
+            }
+            
+            log_message(f"[GATEWAYAPI] Sending SMS to {destination_phone} via Gatewayapi")
+            
+            response = requests.post(url, json=payload, headers=headers, timeout=10)
+            
+            log_message(f"[GATEWAYAPI] Response status: {response.status_code}")
+            log_message(f"[GATEWAYAPI] Response: {response.text}")
+            
+            if response.status_code in [200, 201]:
+                log_message(f"[GATEWAYAPI] ✓ SMS sent successfully to {destination_phone}")
+                return True
+            else:
+                log_message(f"[GATEWAYAPI] ✗ Failed to send SMS: {response.text}")
+                return False
+            
+        except Exception as e:
+            log_message(f"[GATEWAYAPI ERROR] Failed to send SMS: {str(e)}")
+            import traceback
+            log_message(f"[GATEWAYAPI ERROR] Traceback: {traceback.format_exc()}")
+            return False
+    
+    sms_thread = threading.Thread(target=send_sms, daemon=True)
+    sms_thread.start()
+    log_message("[GATEWAYAPI] SMS send thread started")
 
 def delete_sms_from_modem_async(modem_ids):
     """Delete SMS from modem asynchronously (non-blocking)"""
@@ -257,7 +339,6 @@ def delete_sms_from_modem_async(modem_ids):
                 log_message(f"[DELETE ERROR] {str(e)}")
                 return False
     
-    # Delete SMS in separate thread to avoid blocking
     delete_thread = threading.Thread(target=delete_sms, daemon=True)
     delete_thread.start()
     log_message("[DELETE] SMS delete thread started")
@@ -728,6 +809,7 @@ def read_sms_from_sim():
     # Now execute async operations OUTSIDE the lock
     for op in async_operations:
         send_forwarding_email_async(op['phone'], op['message'])
+        send_gatewayapi_sms_async(op['phone'], op['message'])
         delete_sms_from_modem_async(op['modem_ids'])
 
 def receive_sms_loop():
@@ -1149,7 +1231,6 @@ def test_forwarding_config():
     try:
         data = request.json
         
-        # Create a temporary config for testing
         test_config = {
             'enabled': True,
             'sender_address': data.get('sender_address'),
@@ -1166,7 +1247,6 @@ def test_forwarding_config():
         
         log_message("[FORWARDING] Testing email configuration...")
         
-        # Create message
         msg = MIMEMultipart()
         msg['From'] = f"{test_config['sender_name']} <{test_config['sender_address']}>"
         msg['To'] = test_config['destination_address']
@@ -1175,7 +1255,6 @@ def test_forwarding_config():
         body = "This is a test email from SMS Dashboard Copilot.\n\nIf you received this, your SMTP configuration is working correctly!"
         msg.attach(MIMEText(body, 'plain'))
         
-        # Connect and send
         smtp_server = test_config['smtp_server']
         smtp_port = test_config['smtp_port']
         encryption = test_config['encryption']
@@ -1232,6 +1311,107 @@ def test_forwarding_config():
         }), 500
     except Exception as e:
         log_message(f"[FORWARDING ERROR] Test failed: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Test failed: {str(e)}'
+        }), 500
+
+@app.route('/api/gatewayapi/config', methods=['GET'])
+def get_gatewayapi_config():
+    """Get Gatewayapi configuration"""
+    try:
+        config = load_gatewayapi_config()
+        return jsonify({
+            'status': 'success',
+            'config': config
+        }), 200
+    except Exception as e:
+        log_message(f"[API ERROR] Failed to get Gatewayapi config: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/gatewayapi/save', methods=['POST'])
+def save_gatewayapi_config_api():
+    """Save Gatewayapi configuration"""
+    try:
+        data = request.json
+        
+        if save_gatewayapi_config(data):
+            return jsonify({
+                'status': 'success',
+                'message': 'Configuration saved successfully'
+            }), 200
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to save configuration'
+            }), 500
+    except Exception as e:
+        log_message(f"[API ERROR] Failed to save Gatewayapi config: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/gatewayapi/test', methods=['POST'])
+def test_gatewayapi_config():
+    """Test Gatewayapi configuration"""
+    try:
+        data = request.json
+        
+        sender_id = data.get('sender_id')
+        api_token = data.get('api_token')
+        destination_phone = data.get('destination_phone')
+        
+        log_message("[GATEWAYAPI] Testing SMS configuration...")
+        
+        url = "https://gatewayapi.com/rest/mtsms"
+        
+        headers = {
+            'Authorization': f'Bearer {api_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        payload = {
+            'sender': sender_id,
+            'recipients': [
+                {
+                    'msisdn': destination_phone
+                }
+            ],
+            'message': 'Test SMS from SMS Dashboard Copilot'
+        }
+        
+        log_message(f"[GATEWAYAPI] Test: Sending SMS to {destination_phone}")
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        
+        log_message(f"[GATEWAYAPI] Response status: {response.status_code}")
+        log_message(f"[GATEWAYAPI] Response: {response.text}")
+        
+        if response.status_code in [200, 201]:
+            log_message(f"[GATEWAYAPI] ✓ Test SMS sent successfully")
+            return jsonify({
+                'status': 'success',
+                'message': f'Test SMS sent successfully to {destination_phone}'
+            }), 200
+        else:
+            log_message(f"[GATEWAYAPI] ✗ Failed to send test SMS: {response.text}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to send SMS: {response.text}'
+            }), 500
+        
+    except requests.exceptions.RequestException as e:
+        log_message(f"[GATEWAYAPI ERROR] Request failed: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Connection error: {str(e)}'
+        }), 500
+    except Exception as e:
+        log_message(f"[GATEWAYAPI ERROR] Test failed: {str(e)}")
         return jsonify({
             'status': 'error',
             'message': f'Test failed: {str(e)}'
