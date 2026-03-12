@@ -986,20 +986,29 @@
                 <div id="gatewayapi-form-wrapper" class="form-disabled">
                     <div class="two-column">
                         <div class="form-group">
+                            <label for="gatewayapi-username">API Username:</label>
+                            <input type="text" id="gatewayapi-username" placeholder="your-username" required>
+                            <small style="color: #666; margin-top: 5px; display: block;">Your Gatewayapi username</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="gatewayapi-token">API Token/Password:</label>
+                            <input type="password" id="gatewayapi-token" placeholder="Your API Token" required>
+                            <small style="color: #666; margin-top: 5px; display: block;">Your Gatewayapi API token or password</small>
+                        </div>
+                    </div>
+                    
+                    <div class="two-column">
+                        <div class="form-group">
                             <label for="gatewayapi-sender-id">Sender ID:</label>
                             <input type="text" id="gatewayapi-sender-id" placeholder="MySenderID" required>
                         </div>
                         
                         <div class="form-group">
-                            <label for="gatewayapi-token">API Token:</label>
-                            <input type="password" id="gatewayapi-token" placeholder="Your API Token" required>
+                            <label for="gatewayapi-phone">Destination Phone Number (without +):</label>
+                            <input type="text" id="gatewayapi-phone" placeholder="393935000001" required>
+                            <small style="color: #666; margin-top: 5px; display: block;">Enter phone number without + sign (e.g., 393935000001)</small>
                         </div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="gatewayapi-phone">Destination Phone Number (without +):</label>
-                        <input type="text" id="gatewayapi-phone" placeholder="393935000001" required>
-                        <small style="color: #666; margin-top: 5px; display: block;">Enter phone number without + sign (e.g., 393935000001)</small>
                     </div>
                     
                     <div class="button-group">
@@ -1519,19 +1528,21 @@
                 return;
             }
             
-            const senderId = document.getElementById('gatewayapi-sender-id').value.trim();
+            const username = document.getElementById('gatewayapi-username').value.trim();
             const apiToken = document.getElementById('gatewayapi-token').value.trim();
+            const senderId = document.getElementById('gatewayapi-sender-id').value.trim();
             const destPhone = document.getElementById('gatewayapi-phone').value.trim();
             
-            if (!senderId || !apiToken || !destPhone) {
+            if (!username || !apiToken || !senderId || !destPhone) {
                 showGatewayapiAlert('❌ Please fill in all required fields', 'error');
                 return;
             }
             
             const config = {
                 enabled: document.getElementById('gatewayapi-toggle').checked,
-                sender_id: senderId,
+                username: username,
                 api_token: apiToken,
+                sender_id: senderId,
                 destination_phone: destPhone
             };
             
@@ -1567,8 +1578,9 @@
                         toggle.checked = config.enabled;
                         toggle.dispatchEvent(new Event('change'));
                         
-                        document.getElementById('gatewayapi-sender-id').value = config.sender_id || '';
+                        document.getElementById('gatewayapi-username').value = config.username || '';
                         document.getElementById('gatewayapi-token').value = config.api_token || '';
+                        document.getElementById('gatewayapi-sender-id').value = config.sender_id || '';
                         document.getElementById('gatewayapi-phone').value = config.destination_phone || '';
                     }
                 })
@@ -1576,18 +1588,20 @@
         }
         
         function testGatewayapiConfig() {
-            const senderId = document.getElementById('gatewayapi-sender-id').value.trim();
+            const username = document.getElementById('gatewayapi-username').value.trim();
             const apiToken = document.getElementById('gatewayapi-token').value.trim();
+            const senderId = document.getElementById('gatewayapi-sender-id').value.trim();
             const destPhone = document.getElementById('gatewayapi-phone').value.trim();
             
-            if (!senderId || !apiToken || !destPhone) {
+            if (!username || !apiToken || !senderId || !destPhone) {
                 showGatewayapiAlert('❌ Please fill in all required fields', 'error');
                 return;
             }
             
             const config = {
-                sender_id: senderId,
+                username: username,
                 api_token: apiToken,
+                sender_id: senderId,
                 destination_phone: destPhone
             };
             
