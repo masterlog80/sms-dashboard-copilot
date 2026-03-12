@@ -957,6 +957,59 @@
                     <div id="test-results-text" style="color: #666; font-family: monospace; white-space: pre-wrap; word-break: break-word;"></div>
                 </div>
             </div>
+            
+            <!-- SMS Forwarding via GatewayAPI Card -->
+            <div class="card" style="margin-top: 30px;">
+                <h2>📱 SMS Forwarding via GatewayAPI</h2>
+                <div id="sms-forwarding-alert" class="alert"></div>
+                
+                <!-- Enable/Disable Toggle -->
+                <div class="form-group">
+                    <label>SMS Forwarding Status:</label>
+                    <div class="toggle-switch">
+                        <label class="switch">
+                            <input type="checkbox" id="sms-forwarding-toggle">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="status-badge disabled" id="sms-forwarding-status">Disabled</span>
+                    </div>
+                </div>
+                
+                <div class="section-divider"></div>
+                
+                <!-- SMS Forwarding Configuration Form -->
+                <div id="sms-forwarding-form-wrapper" class="form-disabled">
+                    <div class="two-column">
+                        <div class="form-group">
+                            <label for="gateway-sender-id">Sender ID:</label>
+                            <input type="text" id="gateway-sender-id" placeholder="YourSenderID" required>
+                            <small style="color: #666; margin-top: 5px; display: block;">Alphanumeric sender ID for SMS</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="gateway-api-token">API Token:</label>
+                            <input type="password" id="gateway-api-token" placeholder="Your GatewayAPI Token" required>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="gateway-destination">Destination Phone Number:</label>
+                        <input type="tel" id="gateway-destination" placeholder="1234567890" required>
+                        <small style="color: #666; margin-top: 5px; display: block;">Phone number without the + prefix (e.g., 1234567890)</small>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button type="button" class="test-btn" onclick="testSmsForwardingConfig()">🧪 Test Configuration</button>
+                        <button type="button" class="save-btn" onclick="saveSmsForwardingConfig()">💾 Save Configuration</button>
+                    </div>
+                </div>
+                
+                <!-- Test Results -->
+                <div id="sms-test-results" style="display: none; margin-top: 20px; padding: 15px; background: #f9f9f9; border-radius: 5px;">
+                    <h4 style="color: #333; margin-bottom: 10px;">Test Results:</h4>
+                    <div id="sms-test-results-text" style="color: #666; font-family: monospace; white-space: pre-wrap; word-break: break-word;"></div>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -1235,6 +1288,16 @@
             }, 5000);
         }
         
+        // Show SMS forwarding alert
+        function showSmsForwardingAlert(message, type) {
+            const alert = document.getElementById('sms-forwarding-alert');
+            alert.textContent = message;
+            alert.className = 'alert ' + type;
+            setTimeout(() => {
+                alert.className = 'alert';
+            }, 5000);
+        }
+        
         // Handle SMS form submission
         document.getElementById('sms-form').addEventListener('submit', function(e) {
             e.preventDefault();
@@ -1273,10 +1336,28 @@
             });
         });
         
-        // Forwarding Functions
+        // Email Forwarding Functions
         document.getElementById('forwarding-toggle').addEventListener('change', function() {
             const formWrapper = document.getElementById('forwarding-form-wrapper');
             const status = document.getElementById('forwarding-status');
+            
+            if (this.checked) {
+                formWrapper.classList.remove('form-disabled');
+                status.textContent = 'Enabled';
+                status.classList.remove('disabled');
+                status.classList.add('enabled');
+            } else {
+                formWrapper.classList.add('form-disabled');
+                status.textContent = 'Disabled';
+                status.classList.add('disabled');
+                status.classList.remove('enabled');
+            }
+        });
+        
+        // SMS Forwarding Functions
+        document.getElementById('sms-forwarding-toggle').addEventListener('change', function() {
+            const formWrapper = document.getElementById('sms-forwarding-form-wrapper');
+            const status = document.getElementById('sms-forwarding-status');
             
             if (this.checked) {
                 formWrapper.classList.remove('form-disabled');
@@ -1344,6 +1425,41 @@
             });
         }
         
+        function saveSmsForwardingConfig() {
+            if (!document.getElementById('sms-forwarding-toggle').checked) {
+                showSmsForwardingAlert('❌ Please enable SMS forwarding first', 'error');
+                return;
+            }
+            
+            const config = {
+                enabled: document.getElementById('sms-forwarding-toggle').checked,
+                sender_id: document.getElementById('gateway-sender-id').value,
+                api_token: document.getElementById('gateway-api-token').value,
+                destination_phone: document.getElementById('gateway-destination').value
+            };
+            
+            fetch('/api/sms-forwarding/save', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(config)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    showSmsForwardingAlert('✅ Configuration saved successfully!', 'success');
+                    loadSmsForwardingConfig();
+                } else {
+                    showSmsForwardingAlert(`❌ Error: ${data.message}`, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showSmsForwardingAlert('❌ Error saving configuration', 'error');
+            });
+        }
+        
         function loadForwardingConfig() {
             fetch('/api/forwarding/config')
                 .then(response => response.json())
@@ -1369,6 +1485,24 @@
                     }
                 })
                 .catch(error => console.error('Error loading forwarding config:', error));
+        }
+        
+        function loadSmsForwardingConfig() {
+            fetch('/api/sms-forwarding/config')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const config = data.config;
+                        const toggle = document.getElementById('sms-forwarding-toggle');
+                        toggle.checked = config.enabled;
+                        toggle.dispatchEvent(new Event('change'));
+                        
+                        document.getElementById('gateway-sender-id').value = config.sender_id || '';
+                        document.getElementById('gateway-api-token').value = config.api_token || '';
+                        document.getElementById('gateway-destination').value = config.destination_phone || '';
+                    }
+                })
+                .catch(error => console.error('Error loading SMS forwarding config:', error));
         }
         
         function testForwardingConfig() {
@@ -1424,12 +1558,59 @@
             });
         }
         
+        function testSmsForwardingConfig() {
+            const config = {
+                sender_id: document.getElementById('gateway-sender-id').value,
+                api_token: document.getElementById('gateway-api-token').value,
+                destination_phone: document.getElementById('gateway-destination').value
+            };
+            
+            const testBtn = event.target;
+            testBtn.disabled = true;
+            testBtn.textContent = '🔄 Testing...';
+            
+            fetch('/api/sms-forwarding/test', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(config)
+            })
+            .then(response => response.json())
+            .then(data => {
+                const resultsDiv = document.getElementById('sms-test-results');
+                const resultsText = document.getElementById('sms-test-results-text');
+                resultsDiv.style.display = 'block';
+                
+                if (data.status === 'success') {
+                    resultsText.textContent = '✅ Test SMS Sent Successfully!\n\n' + (data.message || 'SMS forwarding is configured correctly.');
+                    resultsDiv.style.borderLeft = '4px solid #4caf50';
+                } else {
+                    resultsText.textContent = '❌ Test Failed\n\n' + (data.message || 'Check your GatewayAPI configuration.');
+                    resultsDiv.style.borderLeft = '4px solid #f44336';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                const resultsDiv = document.getElementById('sms-test-results');
+                const resultsText = document.getElementById('sms-test-results-text');
+                resultsDiv.style.display = 'block';
+                resultsDiv.style.borderLeft = '4px solid #f44336';
+                resultsText.textContent = '❌ Connection Error\n\n' + error.message;
+            })
+            .finally(() => {
+                testBtn.disabled = false;
+                testBtn.textContent = '🧪 Test Configuration';
+            });
+        }
+        
         // Load initial data
         loadStats();
         loadMessages();
         loadSCA();
         loadSignalStrength();
         loadForwardingConfig();
+        loadSmsForwardingConfig();
         
         // Refresh stats and messages every 5 seconds
         setInterval(() => {
@@ -1448,4 +1629,3 @@
         }, 30000);
     </script>
 </body>
-</html>
