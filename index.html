@@ -650,6 +650,11 @@
             gap: 20px;
         }
         
+        .form-disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        
         @media (max-width: 1200px) {
             .dashboard.three-column {
                 grid-template-columns: 1fr 1fr;
@@ -861,7 +866,7 @@
                 <div class="section-divider"></div>
                 
                 <!-- Email Configuration Form -->
-                <form id="forwarding-form">
+                <form id="forwarding-form" class="form-disabled">
                     <div class="two-column">
                         <!-- Left Column -->
                         <div>
@@ -958,7 +963,6 @@
     <script>
         // Page Navigation
         function switchPage(pageName) {
-            // Hide all pages
             document.querySelectorAll('.page').forEach(page => {
                 page.classList.remove('active');
             });
@@ -966,7 +970,6 @@
                 tab.classList.remove('active');
             });
             
-            // Show selected page
             document.getElementById(pageName + '-page').classList.add('active');
             event.target.classList.add('active');
         }
@@ -1272,22 +1275,20 @@
         
         // Forwarding Functions
         function toggleForwarding() {
-            const toggle = document.getElementById('forwarding-toggle').checked;
-            const status = document.getElementById('forwarding-status');
             const form = document.getElementById('forwarding-form');
+            const toggle = document.getElementById('forwarding-toggle');
+            const status = document.getElementById('forwarding-status');
             
-            if (toggle) {
+            if (toggle.checked) {
+                form.classList.remove('form-disabled');
                 status.textContent = 'Enabled';
                 status.classList.remove('disabled');
                 status.classList.add('enabled');
-                form.style.opacity = '1';
-                form.style.pointerEvents = 'auto';
             } else {
+                form.classList.add('form-disabled');
                 status.textContent = 'Disabled';
-                status.classList.add('disabled');
                 status.classList.remove('enabled');
-                form.style.opacity = '0.5';
-                form.style.pointerEvents = 'none';
+                status.classList.add('disabled');
             }
         }
         
