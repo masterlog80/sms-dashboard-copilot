@@ -855,10 +855,10 @@
                 <div class="form-group">
                     <label>Email Forwarding Status:</label>
                     <div class="toggle-switch">
-                        <div class="switch">
-                            <input type="checkbox" id="forwarding-toggle" onchange="toggleForwarding()">
+                        <label class="switch">
+                            <input type="checkbox" id="forwarding-toggle">
                             <span class="slider"></span>
-                        </div>
+                        </label>
                         <span class="status-badge disabled" id="forwarding-status">Disabled</span>
                     </div>
                 </div>
@@ -866,7 +866,7 @@
                 <div class="section-divider"></div>
                 
                 <!-- Email Configuration Form -->
-                <form id="forwarding-form" class="form-disabled">
+                <div id="forwarding-form-wrapper" class="form-disabled">
                     <div class="two-column">
                         <!-- Left Column -->
                         <div>
@@ -947,9 +947,9 @@
                     
                     <div class="button-group">
                         <button type="button" class="test-btn" onclick="testForwardingConfig()">🧪 Test Configuration</button>
-                        <button type="submit" class="save-btn" onclick="saveForwardingConfig(event)">💾 Save Configuration</button>
+                        <button type="button" class="save-btn" onclick="saveForwardingConfig()">💾 Save Configuration</button>
                     </div>
-                </form>
+                </div>
                 
                 <!-- Test Results -->
                 <div id="test-results" style="display: none; margin-top: 20px; padding: 15px; background: #f9f9f9; border-radius: 5px;">
@@ -1274,23 +1274,22 @@
         });
         
         // Forwarding Functions
-        function toggleForwarding() {
-            const form = document.getElementById('forwarding-form');
-            const toggle = document.getElementById('forwarding-toggle');
+        document.getElementById('forwarding-toggle').addEventListener('change', function() {
+            const formWrapper = document.getElementById('forwarding-form-wrapper');
             const status = document.getElementById('forwarding-status');
             
-            if (toggle.checked) {
-                form.classList.remove('form-disabled');
+            if (this.checked) {
+                formWrapper.classList.remove('form-disabled');
                 status.textContent = 'Enabled';
                 status.classList.remove('disabled');
                 status.classList.add('enabled');
             } else {
-                form.classList.add('form-disabled');
+                formWrapper.classList.add('form-disabled');
                 status.textContent = 'Disabled';
-                status.classList.remove('enabled');
                 status.classList.add('disabled');
+                status.classList.remove('enabled');
             }
-        }
+        });
         
         function updateEncryption() {
             const encryption = document.getElementById('encryption').value;
@@ -1303,9 +1302,7 @@
             }
         }
         
-        function saveForwardingConfig(e) {
-            e.preventDefault();
-            
+        function saveForwardingConfig() {
             if (!document.getElementById('forwarding-toggle').checked) {
                 showForwardingAlert('❌ Please enable email forwarding first', 'error');
                 return;
@@ -1353,7 +1350,10 @@
                 .then(data => {
                     if (data.status === 'success') {
                         const config = data.config;
-                        document.getElementById('forwarding-toggle').checked = config.enabled;
+                        const toggle = document.getElementById('forwarding-toggle');
+                        toggle.checked = config.enabled;
+                        toggle.dispatchEvent(new Event('change'));
+                        
                         document.getElementById('sender-address').value = config.sender_address || '';
                         document.getElementById('sender-name').value = config.sender_name || '';
                         document.getElementById('subject').value = config.subject || '';
@@ -1365,7 +1365,6 @@
                         document.getElementById('smtp-username').value = config.smtp_username || '';
                         document.getElementById('smtp-password').value = config.smtp_password || '';
                         
-                        toggleForwarding();
                         updateEncryption();
                     }
                 })
