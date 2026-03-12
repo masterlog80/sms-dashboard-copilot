@@ -1358,6 +1358,7 @@
                 status.textContent = 'Disabled';
                 status.classList.add('disabled');
                 status.classList.remove('enabled');
+                disableForwardingConfig();
             }
         });
         
@@ -1373,13 +1374,15 @@
         }
         
         function saveForwardingConfig() {
-            if (!document.getElementById('forwarding-toggle').checked) {
-                showForwardingAlert('❌ Please enable email forwarding first', 'error');
+            const isEnabled = document.getElementById('forwarding-toggle').checked;
+            
+            if (!isEnabled) {
+                showForwardingAlert('❌ Please enable email forwarding first to save', 'error');
                 return;
             }
             
             const config = {
-                enabled: document.getElementById('forwarding-toggle').checked,
+                enabled: isEnabled,
                 sender_address: document.getElementById('sender-address').value,
                 sender_name: document.getElementById('sender-name').value,
                 subject: document.getElementById('subject').value,
@@ -1414,6 +1417,38 @@
             });
         }
         
+        function disableForwardingConfig() {
+            const config = {
+                enabled: false,
+                sender_address: document.getElementById('sender-address').value,
+                sender_name: document.getElementById('sender-name').value,
+                subject: document.getElementById('subject').value,
+                destination_address: document.getElementById('destination-address').value,
+                smtp_server: document.getElementById('smtp-server').value,
+                smtp_port: parseInt(document.getElementById('smtp-port').value),
+                encryption: document.getElementById('encryption').value,
+                encryption_protocol: document.getElementById('encryption-protocol').value || null,
+                smtp_username: document.getElementById('smtp-username').value,
+                smtp_password: document.getElementById('smtp-password').value
+            };
+            
+            fetch('/api/forwarding/save', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(config)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    showForwardingAlert('✅ Email forwarding disabled!', 'success');
+                    loadForwardingConfig();
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        }
+        
         function loadForwardingConfig() {
             fetch('/api/forwarding/config')
                 .then(response => response.json())
@@ -1421,8 +1456,24 @@
                     if (data.status === 'success') {
                         const config = data.config;
                         const toggle = document.getElementById('forwarding-toggle');
+                        const formWrapper = document.getElementById('forwarding-form-wrapper');
+                        const status = document.getElementById('forwarding-status');
+                        
+                        // Set the toggle state
                         toggle.checked = config.enabled;
-                        toggle.dispatchEvent(new Event('change'));
+                        
+                        // Update form visibility and status badge
+                        if (config.enabled) {
+                            formWrapper.classList.remove('form-disabled');
+                            status.textContent = 'Enabled';
+                            status.classList.remove('disabled');
+                            status.classList.add('enabled');
+                        } else {
+                            formWrapper.classList.add('form-disabled');
+                            status.textContent = 'Disabled';
+                            status.classList.add('disabled');
+                            status.classList.remove('enabled');
+                        }
                         
                         document.getElementById('sender-address').value = config.sender_address || '';
                         document.getElementById('sender-name').value = config.sender_name || '';
@@ -1511,12 +1562,15 @@
                 status.textContent = 'Disabled';
                 status.classList.add('disabled');
                 status.classList.remove('enabled');
+                disableGatewayapiConfig();
             }
         });
         
         function saveGatewayapiConfig() {
-            if (!document.getElementById('gatewayapi-toggle').checked) {
-                showGatewayapiAlert('❌ Please enable SMS forwarding via Gatewayapi first', 'error');
+            const isEnabled = document.getElementById('gatewayapi-toggle').checked;
+            
+            if (!isEnabled) {
+                showGatewayapiAlert('❌ Please enable SMS forwarding via Gatewayapi first to save', 'error');
                 return;
             }
             
@@ -1530,7 +1584,7 @@
             }
             
             const config = {
-                enabled: document.getElementById('gatewayapi-toggle').checked,
+                enabled: isEnabled,
                 api_token: apiToken,
                 sender_id: senderId,
                 destination_phone: destPhone
@@ -1558,6 +1612,31 @@
             });
         }
         
+        function disableGatewayapiConfig() {
+            const config = {
+                enabled: false,
+                api_token: document.getElementById('gatewayapi-token').value,
+                sender_id: document.getElementById('gatewayapi-sender-id').value,
+                destination_phone: document.getElementById('gatewayapi-phone').value
+            };
+            
+            fetch('/api/gatewayapi/save', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(config)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    showGatewayapiAlert('✅ SMS forwarding disabled!', 'success');
+                    loadGatewayapiConfig();
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        }
+        
         function loadGatewayapiConfig() {
             fetch('/api/gatewayapi/config')
                 .then(response => response.json())
@@ -1565,8 +1644,24 @@
                     if (data.status === 'success') {
                         const config = data.config;
                         const toggle = document.getElementById('gatewayapi-toggle');
+                        const formWrapper = document.getElementById('gatewayapi-form-wrapper');
+                        const status = document.getElementById('gatewayapi-status');
+                        
+                        // Set the toggle state
                         toggle.checked = config.enabled;
-                        toggle.dispatchEvent(new Event('change'));
+                        
+                        // Update form visibility and status badge
+                        if (config.enabled) {
+                            formWrapper.classList.remove('form-disabled');
+                            status.textContent = 'Enabled';
+                            status.classList.remove('disabled');
+                            status.classList.add('enabled');
+                        } else {
+                            formWrapper.classList.add('form-disabled');
+                            status.textContent = 'Disabled';
+                            status.classList.add('disabled');
+                            status.classList.remove('enabled');
+                        }
                         
                         document.getElementById('gatewayapi-token').value = config.api_token || '';
                         document.getElementById('gatewayapi-sender-id').value = config.sender_id || '';
@@ -1626,34 +1721,4 @@
                 resultsText.textContent = '❌ Connection Error\n\n' + error.message;
             })
             .finally(() => {
-                testBtn.disabled = false;
-                testBtn.textContent = '🧪 Test SMS';
-            });
-        }
-        
-        // Load initial data
-        loadStats();
-        loadMessages();
-        loadSCA();
-        loadSignalStrength();
-        loadForwardingConfig();
-        loadGatewayapiConfig();
-        
-        // Refresh stats and messages every 5 seconds
-        setInterval(() => {
-            loadStats();
-            loadMessages();
-        }, 5000);
-        
-        // Refresh signal strength every 10 seconds
-        setInterval(() => {
-            loadSignalStrength();
-        }, 10000);
-        
-        // Refresh SCA every 30 seconds
-        setInterval(() => {
-            loadSCA();
-        }, 30000);
-    </script>
-</body>
-</html>
+                
