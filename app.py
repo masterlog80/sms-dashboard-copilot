@@ -283,7 +283,8 @@ def send_gatewayapi_sms_async(phone, message):
             }
             
             log_message(f"[GATEWAYAPI] Sending SMS to {destination_phone} via Gatewayapi")
-            log_message(f"[GATEWAYAPI] Using Basic Auth with API token")
+            log_message(f"[GATEWAYAPI] Sender ID: {sender_id}")
+            log_message(f"[GATEWAYAPI] Message: {sms_message}")
             
             response = requests.post(url, json=payload, headers=headers, auth=auth, timeout=10)
             
@@ -1380,6 +1381,8 @@ def test_gatewayapi_config():
             'Content-Type': 'application/json'
         }
         
+        test_message = 'Test SMS from SMS Dashboard Copilot'
+        
         payload = {
             'sender': sender_id,
             'recipients': [
@@ -1387,10 +1390,11 @@ def test_gatewayapi_config():
                     'msisdn': destination_phone
                 }
             ],
-            'message': 'Test SMS from SMS Dashboard Copilot'
+            'message': test_message
         }
         
         log_message(f"[GATEWAYAPI] Test: Sending SMS to {destination_phone}")
+        log_message(f"[GATEWAYAPI] Sender ID: {sender_id}")
         log_message(f"[GATEWAYAPI] Using Basic Auth with API token as username")
         
         response = requests.post(url, json=payload, headers=headers, auth=auth, timeout=10)
