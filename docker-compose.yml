@@ -2,18 +2,22 @@ version: '3.8'
 
 services:
   sms-dashboard:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sms-dashboard-copilot-sms-dashboard-1
     ports:
       - "5000:5000"
     devices:
-      - "/dev/ttyUSB0"
+      - /dev/ttyUSB0:/dev/ttyUSB0
     volumes:
-      - data:/app/data
-      - templates:/app/templates
+      - ./data:/app/data
     environment:
-      - FLASK_ENV=development
-      - FLASK_APP=app.py
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    networks:
+      - sms-network
 
-volumes:
-  data:
-  templates:
+networks:
+  sms-network:
+    driver: bridge
