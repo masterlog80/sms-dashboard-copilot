@@ -7,13 +7,19 @@ from datetime import datetime
 import sys
 import threading
 import re
-import subprocess
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import ssl
 
 app = Flask(__name__, template_folder='.')
 
 # Setup logging
 log_file = '/app/data/modem.log'
 os.makedirs('/app/data', exist_ok=True)
+
+# Forwarding config file
+forwarding_config_file = '/app/data/forwarding_config.json'
 
 def log_message(message):
     """Log to both console and file"""
@@ -30,13 +36,11 @@ def log_message(message):
 def try_decode_hex(text):
     """Try to decode hex-encoded text"""
     try:
-        # Check if it looks like hex (all hex characters)
         if not all(c in '0123456789ABCDEFabcdef' for c in text.strip()):
-            return text  # Not hex encoded, return as-is
+            return text
         
         hex_str = text.strip()
         
-        # Try UTF-16BE decoding first (UCS2 - common for Unicode SMS)
         try:
             decoded = bytes.fromhex(hex_str).decode('utf-16-be', errors='ignore')
             if decoded and len(decoded) > 0:
@@ -44,7 +48,6 @@ def try_decode_hex(text):
         except:
             pass
         
-        # Try UTF-8 decoding
         try:
             decoded = bytes.fromhex(hex_str).decode('utf-8', errors='ignore')
             if decoded and len(decoded) > 0:
@@ -52,7 +55,6 @@ def try_decode_hex(text):
         except:
             pass
         
-        # Try Latin-1 (ISO-8859-1) decoding
         try:
             decoded = bytes.fromhex(hex_str).decode('latin-1', errors='ignore')
             if decoded and len(decoded) > 0:
@@ -64,7 +66,7 @@ def try_decode_hex(text):
         log_message(f"[DECODE ERROR] {str(e)}")
         pass
     
-    return text  # Return original if decoding fails
+    return text
 
 # In-memory message storage
 messages = {
@@ -98,8 +100,121 @@ def save_messages_to_file():
     except Exception as e:
         log_message(f"[STORAGE ERROR] Failed to save messages: {str(e)}")
 
+def load_forwarding_config():
+    """Load forwarding configuration"""
+    try:
+        if os.path.exists(forwarding_config_file):
+            with open(forwarding_config_file, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        log_message(f"[FORWARDING ERROR] Failed to load config: {str(e)}")
+    
+    # Return default config
+    return {
+        'enabled': False,
+        'sender_address': '',
+        'sender_name': 'SMS Copilot',
+        'subject': 'New SMS Received: {phone}',
+        'destination_address': '',
+        'smtp_server': '',
+        'smtp_port': 587,
+        'encryption': 'TLS',
+        'encryption_protocol': 'TLSv1.2',
+        'smtp_username': '',
+        'smtp_password': ''
+    }
+
+def save_forwarding_config(config):
+    """Save forwarding configuration"""
+    try:
+        with open(forwarding_config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+        log_message("[FORWARDING] Configuration saved")
+        return True
+    except Exception as e:
+        log_message(f"[FORWARDING ERROR] Failed to save config: {str(e)}")
+        return False
+
+def send_forwarding_email(phone, message):
+    """Send email via SMTP with received SMS"""
+    try:
+        config = load_forwarding_config()
+        
+        if not config['enabled']:
+            log_message("[FORWARDING] Email forwarding is disabled")
+            return False
+        
+        log_message(f"[FORWARDING] Sending email for SMS from {phone}")
+        
+        # Prepare subject and body
+        subject = config['subject'].replace('{phone}', phone).replace('{timestamp}', datetime.now().isoformat())
+        body = f"""
+New SMS Received
+
+From: {phone}
+Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+Message:
+{message}
+
+---
+Sent by SMS Dashboard Copilot
+"""
+        
+        # Create message
+        msg = MIMEMultipart()
+        msg['From'] = f"{config['sender_name']} <{config['sender_address']}>"
+        msg['To'] = config['destination_address']
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+        
+        # Connect and send
+        smtp_server = config['smtp_server']
+        smtp_port = config['smtp_port']
+        encryption = config['encryption']
+        protocol = config['encryption_protocol']
+        username = config['smtp_username']
+        password = config['smtp_password']
+        
+        log_message(f"[FORWARDING] Connecting to {smtp_server}:{smtp_port} with {encryption}")
+        
+        if encryption == 'SSL':
+            context = ssl.create_default_context()
+            if protocol == 'TLSv1.2':
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
+                context.maximum_version = ssl.TLSVersion.TLSv1_2
+            elif protocol == 'TLSv1.3':
+                context.minimum_version = ssl.TLSVersion.TLSv1_3
+            
+            server = smtplib.SMTP_SSL(smtp_server, smtp_port, context=context)
+        else:
+            server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
+            if encryption == 'TLS':
+                context = ssl.create_default_context()
+                if protocol == 'TLSv1.2':
+                    context.minimum_version = ssl.TLSVersion.TLSv1_2
+                    context.maximum_version = ssl.TLSVersion.TLSv1_2
+                elif protocol == 'TLSv1.3':
+                    context.minimum_version = ssl.TLSVersion.TLSv1_3
+                server.starttls(context=context)
+        
+        # Login
+        log_message(f"[FORWARDING] Logging in as {username}")
+        server.login(username, password)
+        
+        # Send
+        server.send_message(msg)
+        server.quit()
+        
+        log_message(f"[FORWARDING] ✓ Email sent successfully to {config['destination_address']}")
+        return True
+        
+    except Exception as e:
+        log_message(f"[FORWARDING ERROR] Failed to send email: {str(e)}")
+        return False
+
 # Track SMS parts for concatenation
-pending_parts = {}  # Map of (phone, timestamp) to list of parts with timestamps
+pending_parts = {}
 
 # Modem lock to prevent simultaneous access
 modem_lock = threading.Lock()
@@ -111,12 +226,12 @@ modem_baudrate = 9600
 modem_connected = False
 receiver_thread = None
 stop_receiver = False
-processed_messages = set()  # Track processed message IDs
+processed_messages = set()
 
 # Health check variables
 last_successful_command_time = time.time()
-modem_health_check_interval = 30  # Check modem health every 30 seconds
-modem_health_timeout = 60  # If no successful command in 60 seconds, restart
+modem_health_check_interval = 30
+modem_health_timeout = 60
 health_check_thread = None
 stop_health_check = False
 
@@ -129,10 +244,8 @@ def restart_application():
     log_message("="*50)
     
     try:
-        # Stop receiver thread
         stop_receiver_thread()
         
-        # Close modem connection
         if modem:
             try:
                 modem.close()
@@ -143,10 +256,8 @@ def restart_application():
         modem = None
         modem_connected = False
         
-        # Wait a bit before restarting
         time.sleep(5)
         
-        # Restart by exiting - Docker will restart the container
         log_message("[RESTART] Exiting application for container restart...")
         os._exit(1)
     except Exception as e:
@@ -171,13 +282,11 @@ def modem_health_check():
             
             log_message(f"[HEALTH] Last successful command was {int(time_since_last_command)} seconds ago")
             
-            # If no successful command in timeout period, restart
             if time_since_last_command > modem_health_timeout:
                 log_message(f"[HEALTH] ⚠️ MODEM UNRESPONSIVE! No successful command for {int(time_since_last_command)} seconds")
                 log_message(f"[HEALTH] Threshold is {modem_health_timeout} seconds")
                 restart_application()
             
-            # Also try a quick AT command to verify modem is alive
             with modem_lock:
                 try:
                     if modem and modem_connected:
@@ -220,7 +329,6 @@ def init_modem():
     
     log_message(f"[MODEM] Attempting to initialize on {modem_port}...")
     
-    # Check if device exists
     if not os.path.exists(modem_port):
         log_message(f"[MODEM ERROR] Device {modem_port} does not exist")
         modem_connected = False
@@ -232,11 +340,9 @@ def init_modem():
         log_message(f"[MODEM] Port opened successfully")
         time.sleep(2)
         
-        # Clear buffer
         modem.flushInput()
         modem.flushOutput()
         
-        # Test modem with AT command
         log_message("[MODEM] Sending AT command...")
         modem.write(b'AT\r\n')
         time.sleep(0.5)
@@ -247,7 +353,6 @@ def init_modem():
             log_message("[MODEM] ✓ Modem detected!")
             last_successful_command_time = time.time()
             
-            # Set text mode
             log_message("[MODEM] Setting text mode...")
             modem.write(b'AT+CMGF=1\r\n')
             time.sleep(0.5)
@@ -255,7 +360,6 @@ def init_modem():
             log_message(f"[MODEM] Text mode response: {response}")
             last_successful_command_time = time.time()
             
-            # Set SMS storage to SIM card (SM)
             log_message("[MODEM] Setting SMS storage to SIM card...")
             modem.write(b'AT+CPMS="SM","SM","SR"\r\n')
             time.sleep(0.5)
@@ -292,35 +396,30 @@ def diagnose_modem():
             
             log_message("[DIAG] Starting modem diagnosis...")
             
-            # Check signal strength
             modem.write(b'AT+CSQ\r\n')
             time.sleep(0.5)
             response = modem.read(100)
             log_message(f"[DIAG] Signal strength: {response}")
             last_successful_command_time = time.time()
             
-            # Check network registration
             modem.write(b'AT+CREG?\r\n')
             time.sleep(0.5)
             response = modem.read(100)
             log_message(f"[DIAG] Network registration: {response}")
             last_successful_command_time = time.time()
             
-            # Check operator
             modem.write(b'AT+COPS?\r\n')
             time.sleep(0.5)
             response = modem.read(100)
             log_message(f"[DIAG] Operator: {response}")
             last_successful_command_time = time.time()
             
-            # Check SMS service center
             modem.write(b'AT+CSCA?\r\n')
             time.sleep(0.5)
             response = modem.read(100)
             log_message(f"[DIAG] SMS Service Center: {response}")
             last_successful_command_time = time.time()
             
-            # Check phone number
             modem.write(b'AT+CNUM\r\n')
             time.sleep(0.5)
             response = modem.read(100)
@@ -349,16 +448,12 @@ def get_signal_strength():
             
             log_message(f"[SIGNAL] Response: {response_str}")
             
-            # Parse: +CSQ: 5,99
-            # Format: +CSQ: <rssi>,<ber>
-            # RSSI: 0-31 (0=-113dBm, 1=-111dBm ... 31=-51dBm, 99=not known)
             if '+CSQ:' in response_str:
                 match = re.search(r'\+CSQ:\s*(\d+),(\d+)', response_str)
                 if match:
                     rssi_val = int(match.group(1))
                     ber = int(match.group(2))
                     
-                    # Convert RSSI to dBm
                     if rssi_val == 99:
                         rssi_dbm = "Unknown"
                         quality = 0
@@ -390,9 +485,7 @@ def get_sms_service_center():
             
             log_message(f"[CSCA] Response: {response_str}")
             
-            # Parse: +CSCA: "+393935000001",145
             if '+CSCA:' in response_str:
-                # Extract the phone number between quotes
                 match = re.search(r'\+CSCA:\s*"([^"]+)"', response_str)
                 if match:
                     sca_number = match.group(1)
@@ -445,9 +538,7 @@ def get_sim_card_usage():
             response_str = response.decode('utf-8', errors='ignore')
             last_successful_command_time = time.time()
             
-            # Parse: +CPMS: "SM",0,20,"SM",0,20,"SR",0,20
             if '+CPMS:' in response_str:
-                # Extract numbers from response
                 numbers = re.findall(r'(\d+)', response_str)
                 if len(numbers) >= 2:
                     used = int(numbers[0])
@@ -467,7 +558,6 @@ def read_sms_from_sim():
             if modem is None or not modem_connected:
                 return
             
-            # List unread SMS from SIM card
             log_message("[RECEIVER] Querying unread SMS from SIM card...")
             modem.write(b'AT+CMGL="REC UNREAD"\r\n')
             time.sleep(1)
@@ -481,7 +571,6 @@ def read_sms_from_sim():
             if '+CMGL:' in response_str:
                 log_message(f"[RECEIVER] Found SMS in response")
                 
-                # Parse messages
                 lines = response_str.split('\r\n')
                 i = 0
                 
@@ -490,38 +579,30 @@ def read_sms_from_sim():
                     
                     if '+CMGL:' in line:
                         try:
-                            # Format: +CMGL: <id>,<stat>,"<oa/da>","<alpha>",<scts>[,<tooa>,<length>]
                             log_message(f"[RECEIVER] Parsing line: {line}")
                             
-                            # Extract message ID, phone number, and timestamp
                             parts = line.split(',')
                             
                             if len(parts) >= 5:
                                 msg_id = parts[0].split(':')[1].strip()
                                 stat = parts[1].strip()
                                 phone = parts[2].strip().strip('"')
-                                # Reconstruct timestamp
                                 timestamp_part = parts[4].strip().strip('"')
                                 
-                                # Check if this specific message ID was already processed
                                 if msg_id in processed_messages:
                                     log_message(f"[RECEIVER] Message {msg_id} already processed, skipping")
                                     i += 1
                                     continue
                                 
-                                # Message text is on next line
                                 if i + 1 < len(lines):
                                     message_text = lines[i + 1].strip()
                                     
-                                    if message_text:  # Only decode if there's text
-                                        # Try to decode if it's hex
+                                    if message_text:
                                         decoded_text = try_decode_hex(message_text)
                                         
                                         if decoded_text:
-                                            # Create a key for grouping multi-part messages
                                             msg_key = (phone, timestamp_part)
                                             
-                                            # Store this part
                                             if msg_key not in pending_parts:
                                                 pending_parts[msg_key] = {
                                                     'parts': [],
@@ -544,7 +625,6 @@ def read_sms_from_sim():
             else:
                 log_message(f"[RECEIVER] No +CMGL: in response (no messages or error)")
             
-            # Now check pending parts for completion
             current_time = time.time()
             keys_to_remove = []
             
@@ -554,19 +634,15 @@ def read_sms_from_sim():
                 first_seen = msg_data['first_seen']
                 phone, timestamp_part = msg_key
                 
-                # Wait at least 6 seconds for all parts to arrive, OR if no new messages were found
                 if (current_time - first_seen > 6) or (len(response_str) < 100):
-                    # Combine and store this message
                     combined_text = ''.join([p['text'] for p in parts_list])
                     
-                    # Check if we already have this combined message
                     already_stored = any(
                         m['phone'] == phone and m['message'] == combined_text 
                         for m in messages['received']
                     )
                     
                     if not already_stored and combined_text:
-                        # Store combined message locally
                         message = {
                             'type': 'received',
                             'phone': phone,
@@ -581,12 +657,13 @@ def read_sms_from_sim():
                         log_message(f"[RECEIVER] ✓ COMBINED SMS from {phone} ({len(parts_list)} parts): {combined_text[:50]}")
                         log_message(f"[RECEIVER] Message stored locally and will be deleted from SIM card")
                         
-                        # Delete from modem to free up space
+                        # Send forwarding email if enabled
+                        send_forwarding_email(phone, combined_text)
+                        
                         delete_sms_from_modem(modem_ids)
                         
                         keys_to_remove.append(msg_key)
             
-            # Remove stored messages from pending
             for key in keys_to_remove:
                 del pending_parts[key]
                 
@@ -602,7 +679,7 @@ def receive_sms_loop():
     while not stop_receiver and modem_connected:
         try:
             read_sms_from_sim()
-            time.sleep(3)  # Check every 3 seconds
+            time.sleep(3)
         except Exception as e:
             log_message(f"[RECEIVER ERROR] {str(e)}")
             time.sleep(3)
@@ -636,12 +713,10 @@ def send_sms(phone, message_text):
                 log_message(f"[SMS ERROR] Modem not connected")
                 return False, "Modem not connected. Check /dev/ttyUSB0"
             
-            # Clear buffer before sending
             modem.flushInput()
             modem.flushOutput()
             time.sleep(0.5)
             
-            # Send SMS command
             log_message(f"[SMS] Sending CMGS command...")
             cmd = f'AT+CMGS="{phone}"\r\n'
             modem.write(cmd.encode())
@@ -653,37 +728,29 @@ def send_sms(phone, message_text):
             
             if b'>' in response:
                 log_message(f"[SMS] Modem ready, sending message...")
-                # Send message text
                 modem.write(message_text.encode())
                 time.sleep(0.5)
-                # Send Ctrl+Z to complete
                 modem.write(b'\x1A')
-                time.sleep(3)  # Wait longer for response
+                time.sleep(3)
                 
-                # Read response
                 response = modem.read(500)
                 log_message(f"[SMS] Send response: {response}")
                 response_str = response.decode('utf-8', errors='ignore')
                 last_successful_command_time = time.time()
                 
-                # Check for success indicators
                 if b'+CMGS:' in response or b'OK' in response:
                     log_message(f"[SMS] ✓ Message sent successfully")
                     return True, "SMS sent successfully"
                 elif b'ERROR' in response or b'CMS ERROR' in response:
-                    # Extract error code if possible
                     error_match = re.search(r'ERROR:\s*(\d+)', response_str)
                     error_code = error_match.group(1) if error_match else "Unknown"
                     log_message(f"[SMS] ✗ CMS Error {error_code}")
                     
-                    # CMS ERROR 500 usually means device doesn't support feature
-                    # Try sending without fancy encoding
                     log_message(f"[SMS] Retrying with basic encoding...")
                     modem.flushInput()
                     modem.flushOutput()
                     time.sleep(0.5)
                     
-                    # Try again
                     modem.write(cmd.encode())
                     time.sleep(1.5)
                     response = modem.read(100)
@@ -721,7 +788,6 @@ def delete_sms_from_modem(modem_ids):
             if modem is None or not modem_connected:
                 return False, "Modem not connected"
             
-            # Handle both single ID and list of IDs
             if isinstance(modem_ids, list):
                 for modem_id in modem_ids:
                     log_message(f"[DELETE] Deleting SMS with ID {modem_id} from modem...")
@@ -757,19 +823,17 @@ def clear_sim_storage():
                 return False, "Modem not connected"
             
             log_message(f"[CLEAR] Deleting all SMS from SIM card...")
-            modem.write(b'AT+CMGD=1,4\r\n')  # Delete all messages
-            time.sleep(2)  # Increased wait time
+            modem.write(b'AT+CMGD=1,4\r\n')
+            time.sleep(2)
             response = modem.read(200)
             log_message(f"[CLEAR] Response: {response}")
             last_successful_command_time = time.time()
             
-            # Check for OK in response
             if b'OK' in response or len(response) > 0:
                 log_message(f"[CLEAR] ✓ All SMS deleted from SIM card")
                 return True, "SIM storage cleared"
             else:
                 log_message(f"[CLEAR] Checking storage status...")
-                # Verify by checking storage
                 modem.write(b'AT+CPMS?\r\n')
                 time.sleep(1)
                 status_response = modem.read(200)
@@ -792,7 +856,6 @@ def index():
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
-    # Get SIM card usage
     sim_usage = get_sim_card_usage()
     
     return jsonify({
@@ -819,10 +882,8 @@ def send_message():
         
         log_message(f"[API] Received SMS request: {phone} - {message_text[:30]}...")
         
-        # Send via modem
         success, status = send_sms(phone, message_text)
         
-        # Store message locally
         message = {
             'type': 'sent',
             'phone': phone,
@@ -861,7 +922,6 @@ def delete_message(message_index):
     try:
         log_message(f"[API] Delete request for message index {message_index}")
         
-        # Find the message in the list
         all_messages = messages['sent'] + messages['received']
         all_messages.sort(key=lambda x: x['timestamp'], reverse=True)
         
@@ -870,14 +930,12 @@ def delete_message(message_index):
         
         message = all_messages[message_index]
         
-        # If it's a received message, remove from received
         if message['type'] == 'received':
             for idx, msg in enumerate(messages['received']):
                 if msg == message:
                     messages['received'].pop(idx)
                     break
         else:
-            # For sent messages, remove from sent
             for idx, msg in enumerate(messages['sent']):
                 if msg == message:
                     messages['sent'].pop(idx)
@@ -904,11 +962,9 @@ def clear_sim_storage_api():
     try:
         log_message(f"[API] Clear SIM storage request")
         
-        # Delete all from modem
         success, status = clear_sim_storage()
         
         if success:
-            # Also clear the in-memory storage
             messages['sent'].clear()
             messages['received'].clear()
             pending_parts.clear()
@@ -1018,26 +1074,156 @@ def get_logs():
     try:
         with open(log_file, 'r') as f:
             logs = f.readlines()
-        return jsonify({'logs': logs[-100:]})  # Last 100 lines
+        return jsonify({'logs': logs[-100:]})
     except:
         return jsonify({'logs': ['No logs available']})
+
+@app.route('/api/forwarding/config', methods=['GET'])
+def get_forwarding_config():
+    """Get forwarding configuration"""
+    try:
+        config = load_forwarding_config()
+        return jsonify({
+            'status': 'success',
+            'config': config
+        }), 200
+    except Exception as e:
+        log_message(f"[API ERROR] Failed to get config: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/forwarding/save', methods=['POST'])
+def save_forwarding_config_api():
+    """Save forwarding configuration"""
+    try:
+        data = request.json
+        
+        if save_forwarding_config(data):
+            return jsonify({
+                'status': 'success',
+                'message': 'Configuration saved successfully'
+            }), 200
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to save configuration'
+            }), 500
+    except Exception as e:
+        log_message(f"[API ERROR] Failed to save config: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/forwarding/test', methods=['POST'])
+def test_forwarding_config():
+    """Test forwarding configuration"""
+    try:
+        data = request.json
+        
+        # Create a temporary config for testing
+        test_config = {
+            'enabled': True,
+            'sender_address': data.get('sender_address'),
+            'sender_name': data.get('sender_name', 'SMS Copilot'),
+            'subject': data.get('subject', 'Test Email from SMS Copilot'),
+            'destination_address': data.get('destination_address'),
+            'smtp_server': data.get('smtp_server'),
+            'smtp_port': data.get('smtp_port', 587),
+            'encryption': data.get('encryption'),
+            'encryption_protocol': data.get('encryption_protocol'),
+            'smtp_username': data.get('smtp_username'),
+            'smtp_password': data.get('smtp_password')
+        }
+        
+        log_message("[FORWARDING] Testing email configuration...")
+        
+        # Create message
+        msg = MIMEMultipart()
+        msg['From'] = f"{test_config['sender_name']} <{test_config['sender_address']}>"
+        msg['To'] = test_config['destination_address']
+        msg['Subject'] = test_config['subject']
+        
+        body = "This is a test email from SMS Dashboard Copilot.\n\nIf you received this, your SMTP configuration is working correctly!"
+        msg.attach(MIMEText(body, 'plain'))
+        
+        # Connect and send
+        smtp_server = test_config['smtp_server']
+        smtp_port = test_config['smtp_port']
+        encryption = test_config['encryption']
+        protocol = test_config['encryption_protocol']
+        username = test_config['smtp_username']
+        password = test_config['smtp_password']
+        
+        log_message(f"[FORWARDING] Test: Connecting to {smtp_server}:{smtp_port} with {encryption}")
+        
+        if encryption == 'SSL':
+            context = ssl.create_default_context()
+            if protocol == 'TLSv1.2':
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
+                context.maximum_version = ssl.TLSVersion.TLSv1_2
+            elif protocol == 'TLSv1.3':
+                context.minimum_version = ssl.TLSVersion.TLSv1_3
+            
+            server = smtplib.SMTP_SSL(smtp_server, smtp_port, context=context, timeout=10)
+        else:
+            server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
+            if encryption == 'TLS':
+                context = ssl.create_default_context()
+                if protocol == 'TLSv1.2':
+                    context.minimum_version = ssl.TLSVersion.TLSv1_2
+                    context.maximum_version = ssl.TLSVersion.TLSv1_2
+                elif protocol == 'TLSv1.3':
+                    context.minimum_version = ssl.TLSVersion.TLSv1_3
+                server.starttls(context=context)
+        
+        log_message(f"[FORWARDING] Test: Logging in as {username}")
+        server.login(username, password)
+        
+        server.send_message(msg)
+        server.quit()
+        
+        log_message(f"[FORWARDING] ✓ Test email sent successfully to {test_config['destination_address']}")
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Test email sent successfully to {test_config["destination_address"]}'
+        }), 200
+        
+    except smtplib.SMTPAuthenticationError as e:
+        log_message(f"[FORWARDING ERROR] Authentication failed: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Authentication failed: Check your username and password'
+        }), 500
+    except smtplib.SMTPException as e:
+        log_message(f"[FORWARDING ERROR] SMTP error: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'SMTP error: {str(e)}'
+        }), 500
+    except Exception as e:
+        log_message(f"[FORWARDING ERROR] Test failed: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Test failed: {str(e)}'
+        }), 500
 
 if __name__ == '__main__':
     log_message("="*50)
     log_message("SMS DASHBOARD STARTING...")
     log_message("="*50)
     
-    # Load messages from persistent storage
     load_messages_from_file()
     
-    # Initialize modem on startup
     init_modem()
     
     log_message("="*50)
     log_message(f"Modem Status: {'CONNECTED' if modem_connected else 'NOT CONNECTED'}")
     log_message("="*50)
     
-    # Start SMS receiver thread
     if modem_connected:
         start_receiver()
         start_health_check()
