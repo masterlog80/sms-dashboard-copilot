@@ -862,7 +862,7 @@
                     <label>Email Forwarding Status:</label>
                     <div class="toggle-switch">
                         <label class="switch">
-                            <input type="checkbox" id="forwarding-toggle" onchange="toggleForwarding()">
+                            <input type="checkbox" id="forwarding-toggle" onchange="updateForwardingUI()">
                             <span class="slider"></span>
                         </label>
                         <span class="status-badge disabled" id="forwarding-status">Disabled</span>
@@ -973,7 +973,7 @@
                     <label>SMS Forwarding via Gatewayapi Status:</label>
                     <div class="toggle-switch">
                         <label class="switch">
-                            <input type="checkbox" id="gatewayapi-toggle" onchange="toggleGatewayapi()">
+                            <input type="checkbox" id="gatewayapi-toggle" onchange="updateGatewayapiUI()">
                             <span class="slider"></span>
                         </label>
                         <span class="status-badge disabled" id="gatewayapi-status">Disabled</span>
@@ -1343,8 +1343,8 @@
         
         // ===== EMAIL FORWARDING FUNCTIONS =====
         
-        // Email Forwarding Toggle
-        function toggleForwarding() {
+        // Update Forwarding UI
+        function updateForwardingUI() {
             const toggle = document.getElementById('forwarding-toggle');
             const formWrapper = document.getElementById('forwarding-form-wrapper');
             const status = document.getElementById('forwarding-status');
@@ -1418,10 +1418,15 @@
                 .then(data => {
                     if (data.status === 'success') {
                         const config = data.config;
-                        const toggle = document.getElementById('forwarding-toggle');
-                        toggle.checked = config.enabled;
-                        toggle.dispatchEvent(new Event('change'));
                         
+                        // Set toggle value
+                        const toggle = document.getElementById('forwarding-toggle');
+                        toggle.checked = config.enabled === true;
+                        
+                        // Manually update UI instead of using change event
+                        updateForwardingUI();
+                        
+                        // Load other values
                         document.getElementById('sender-address').value = config.sender_address || '';
                         document.getElementById('sender-name').value = config.sender_name || '';
                         document.getElementById('subject').value = config.subject || '';
@@ -1494,8 +1499,8 @@
         
         // ===== GATEWAYAPI SMS FORWARDING FUNCTIONS =====
         
-        // Gatewayapi Toggle
-        function toggleGatewayapi() {
+        // Update Gatewayapi UI
+        function updateGatewayapiUI() {
             const toggle = document.getElementById('gatewayapi-toggle');
             const formWrapper = document.getElementById('gatewayapi-form-wrapper');
             const status = document.getElementById('gatewayapi-status');
@@ -1559,10 +1564,15 @@
                 .then(data => {
                     if (data.status === 'success') {
                         const config = data.config;
-                        const toggle = document.getElementById('gatewayapi-toggle');
-                        toggle.checked = config.enabled;
-                        toggle.dispatchEvent(new Event('change'));
                         
+                        // Set toggle value
+                        const toggle = document.getElementById('gatewayapi-toggle');
+                        toggle.checked = config.enabled === true;
+                        
+                        // Manually update UI instead of using change event
+                        updateGatewayapiUI();
+                        
+                        // Load other values
                         document.getElementById('gatewayapi-token').value = config.api_token || '';
                         document.getElementById('gatewayapi-sender-id').value = config.sender_id || '';
                         document.getElementById('gatewayapi-phone').value = config.destination_phone || '';
