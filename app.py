@@ -145,7 +145,7 @@ def send_forwarding_email_async(phone, message):
                 log_message("[FORWARDING] Email forwarding is disabled, skipping")
                 return False
             
-            log_message(f"[FORWARDING] Sending email for SMS from {phone}")
+            log_message(f"[FORWARDING] Starting async email send for SMS from {phone}")
             
             # Prepare subject and body
             subject = config['subject'].replace('{phone}', phone).replace('{timestamp}', datetime.now().isoformat())
@@ -212,11 +212,14 @@ Sent by SMS Dashboard Copilot
             
         except Exception as e:
             log_message(f"[FORWARDING ERROR] Failed to send email: {str(e)}")
+            import traceback
+            log_message(f"[FORWARDING ERROR] Traceback: {traceback.format_exc()}")
             return False
     
     # Send email in separate thread to avoid blocking SMS reception
     email_thread = threading.Thread(target=send_email, daemon=True)
     email_thread.start()
+    log_message("[FORWARDING] Email send thread started")
 
 # Track SMS parts for concatenation
 pending_parts = {}
@@ -594,6 +597,9 @@ def read_sms_from_sim():
                                 phone = parts[2].strip().strip('"')
                                 timestamp_part = parts[4].strip().strip('"')
                                 
+                                # Decode phone number if it's hex
+                                phone = try_decode_hex(phone)
+                                
                                 if msg_id in processed_messages:
                                     log_message(f"[RECEIVER] Message {msg_id} already processed, skipping")
                                     i += 1
@@ -661,6 +667,9 @@ def read_sms_from_sim():
                         
                         log_message(f"[RECEIVER] ✓ COMBINED SMS from {phone} ({len(parts_list)} parts): {combined_text[:50]}")
                         log_message(f"[RECEIVER] Message stored locally and will be deleted from SIM card")
+                        
+                        # Start email forwarding in background thread (release modem lock)
+                        send_forwarding_email_async(phone, combined_text)
                         
                         delete_sms_from_modem(modem_ids)
                         keys_to_remove.append(msg_key)
