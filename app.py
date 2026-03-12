@@ -7,6 +7,7 @@ from datetime import datetime
 import sys
 import threading
 import re
+import subprocess
 
 app = Flask(__name__, template_folder='.')
 
@@ -97,10 +98,7 @@ def save_messages_to_file():
     except Exception as e:
         log_message(f"[STORAGE ERROR] Failed to save messages: {str(e)}")
 
-# Track modem SMS indices for deletion
-sms_modem_indices = {}  # Map of message index to modem message ID
-
-# Track SMS parts for concatenation - DON'T store yet
+# Track SMS parts for concatenation
 pending_parts = {}  # Map of (phone, timestamp) to list of parts with timestamps
 
 # Modem lock to prevent simultaneous access
@@ -115,9 +113,110 @@ receiver_thread = None
 stop_receiver = False
 processed_messages = set()  # Track processed message IDs
 
+# Health check variables
+last_successful_command_time = time.time()
+modem_health_check_interval = 30  # Check modem health every 30 seconds
+modem_health_timeout = 60  # If no successful command in 60 seconds, restart
+health_check_thread = None
+stop_health_check = False
+
+def restart_application():
+    """Restart the entire application"""
+    global modem, modem_connected
+    
+    log_message("="*50)
+    log_message("⚠️ RESTARTING APPLICATION DUE TO MODEM FAILURE")
+    log_message("="*50)
+    
+    try:
+        # Stop receiver thread
+        stop_receiver_thread()
+        
+        # Close modem connection
+        if modem:
+            try:
+                modem.close()
+                log_message("[RESTART] Modem connection closed")
+            except:
+                pass
+        
+        modem = None
+        modem_connected = False
+        
+        # Wait a bit before restarting
+        time.sleep(5)
+        
+        # Restart by exiting - Docker will restart the container
+        log_message("[RESTART] Exiting application for container restart...")
+        os._exit(1)
+    except Exception as e:
+        log_message(f"[RESTART ERROR] {str(e)}")
+        os._exit(1)
+
+def modem_health_check():
+    """Periodically check if modem is still responsive"""
+    global last_successful_command_time, modem_connected, stop_health_check
+    
+    log_message("[HEALTH] Modem health check thread started")
+    
+    while not stop_health_check:
+        try:
+            time.sleep(modem_health_check_interval)
+            
+            if not modem_connected:
+                continue
+            
+            current_time = time.time()
+            time_since_last_command = current_time - last_successful_command_time
+            
+            log_message(f"[HEALTH] Last successful command was {int(time_since_last_command)} seconds ago")
+            
+            # If no successful command in timeout period, restart
+            if time_since_last_command > modem_health_timeout:
+                log_message(f"[HEALTH] ⚠️ MODEM UNRESPONSIVE! No successful command for {int(time_since_last_command)} seconds")
+                log_message(f"[HEALTH] Threshold is {modem_health_timeout} seconds")
+                restart_application()
+            
+            # Also try a quick AT command to verify modem is alive
+            with modem_lock:
+                try:
+                    if modem and modem_connected:
+                        modem.write(b'AT\r\n')
+                        time.sleep(0.5)
+                        response = modem.read(100)
+                        if b'OK' in response:
+                            last_successful_command_time = time.time()
+                            log_message("[HEALTH] ✓ Modem is responsive")
+                        else:
+                            log_message("[HEALTH] ⚠️ Modem not responding to AT command")
+                            restart_application()
+                except Exception as e:
+                    log_message(f"[HEALTH] ⚠️ Health check failed: {str(e)}")
+                    restart_application()
+        except Exception as e:
+            log_message(f"[HEALTH ERROR] {str(e)}")
+            time.sleep(5)
+    
+    log_message("[HEALTH] Modem health check thread stopped")
+
+def start_health_check():
+    """Start the modem health check thread"""
+    global health_check_thread, stop_health_check
+    
+    stop_health_check = False
+    health_check_thread = threading.Thread(target=modem_health_check, daemon=True)
+    health_check_thread.start()
+    log_message("[HEALTH] Started health check thread")
+
+def stop_health_check_thread():
+    """Stop the modem health check thread"""
+    global stop_health_check
+    stop_health_check = True
+    log_message("[HEALTH] Stopping health check thread...")
+
 def init_modem():
     """Initialize GSM modem connection"""
-    global modem, modem_connected
+    global modem, modem_connected, last_successful_command_time
     
     log_message(f"[MODEM] Attempting to initialize on {modem_port}...")
     
@@ -146,6 +245,7 @@ def init_modem():
         
         if b'OK' in response:
             log_message("[MODEM] ✓ Modem detected!")
+            last_successful_command_time = time.time()
             
             # Set text mode
             log_message("[MODEM] Setting text mode...")
@@ -153,6 +253,7 @@ def init_modem():
             time.sleep(0.5)
             response = modem.read(100)
             log_message(f"[MODEM] Text mode response: {response}")
+            last_successful_command_time = time.time()
             
             # Set SMS storage to SIM card (SM)
             log_message("[MODEM] Setting SMS storage to SIM card...")
@@ -160,6 +261,7 @@ def init_modem():
             time.sleep(0.5)
             response = modem.read(200)
             log_message(f"[MODEM] Storage response: {response}")
+            last_successful_command_time = time.time()
             
             modem_connected = True
             log_message("[MODEM] ✓ Modem fully initialized")
@@ -181,7 +283,7 @@ def init_modem():
 
 def diagnose_modem():
     """Diagnose modem and network status"""
-    global modem
+    global modem, last_successful_command_time
     
     with modem_lock:
         try:
@@ -195,30 +297,35 @@ def diagnose_modem():
             time.sleep(0.5)
             response = modem.read(100)
             log_message(f"[DIAG] Signal strength: {response}")
+            last_successful_command_time = time.time()
             
             # Check network registration
             modem.write(b'AT+CREG?\r\n')
             time.sleep(0.5)
             response = modem.read(100)
             log_message(f"[DIAG] Network registration: {response}")
+            last_successful_command_time = time.time()
             
             # Check operator
             modem.write(b'AT+COPS?\r\n')
             time.sleep(0.5)
             response = modem.read(100)
             log_message(f"[DIAG] Operator: {response}")
+            last_successful_command_time = time.time()
             
             # Check SMS service center
             modem.write(b'AT+CSCA?\r\n')
             time.sleep(0.5)
             response = modem.read(100)
             log_message(f"[DIAG] SMS Service Center: {response}")
+            last_successful_command_time = time.time()
             
             # Check phone number
             modem.write(b'AT+CNUM\r\n')
             time.sleep(0.5)
             response = modem.read(100)
             log_message(f"[DIAG] Phone number: {response}")
+            last_successful_command_time = time.time()
             
             return "Diagnosis complete - check logs"
         except Exception as e:
@@ -227,7 +334,7 @@ def diagnose_modem():
 
 def get_signal_strength():
     """Get current signal strength from modem"""
-    global modem
+    global modem, last_successful_command_time
     
     with modem_lock:
         try:
@@ -238,6 +345,7 @@ def get_signal_strength():
             time.sleep(0.5)
             response = modem.read(100)
             response_str = response.decode('utf-8', errors='ignore')
+            last_successful_command_time = time.time()
             
             log_message(f"[SIGNAL] Response: {response_str}")
             
@@ -267,7 +375,7 @@ def get_signal_strength():
 
 def get_sms_service_center():
     """Get current SMS Service Center"""
-    global modem
+    global modem, last_successful_command_time
     
     with modem_lock:
         try:
@@ -278,6 +386,7 @@ def get_sms_service_center():
             time.sleep(0.5)
             response = modem.read(200)
             response_str = response.decode('utf-8', errors='ignore')
+            last_successful_command_time = time.time()
             
             log_message(f"[CSCA] Response: {response_str}")
             
@@ -296,7 +405,7 @@ def get_sms_service_center():
 
 def set_sms_service_center(sca_number):
     """Set SMS Service Center"""
-    global modem
+    global modem, last_successful_command_time
     
     with modem_lock:
         try:
@@ -309,6 +418,7 @@ def set_sms_service_center(sca_number):
             time.sleep(1)
             response = modem.read(100)
             log_message(f"[SCA] Response: {response}")
+            last_successful_command_time = time.time()
             
             if b'OK' in response:
                 log_message(f"[SCA] ✓ SMS Service Center set successfully")
@@ -322,7 +432,7 @@ def set_sms_service_center(sca_number):
 
 def get_sim_card_usage():
     """Get SIM card storage usage from modem"""
-    global modem
+    global modem, last_successful_command_time
     
     with modem_lock:
         try:
@@ -333,6 +443,7 @@ def get_sim_card_usage():
             time.sleep(0.5)
             response = modem.read(200)
             response_str = response.decode('utf-8', errors='ignore')
+            last_successful_command_time = time.time()
             
             # Parse: +CPMS: "SM",0,20,"SM",0,20,"SR",0,20
             if '+CPMS:' in response_str:
@@ -349,7 +460,7 @@ def get_sim_card_usage():
 
 def read_sms_from_sim():
     """Read SMS from SIM card storage"""
-    global modem, processed_messages, pending_parts
+    global modem, processed_messages, pending_parts, last_successful_command_time
     
     with modem_lock:
         try:
@@ -363,6 +474,7 @@ def read_sms_from_sim():
             
             response = modem.read(2000)
             response_str = response.decode('utf-8', errors='ignore')
+            last_successful_command_time = time.time()
             
             log_message(f"[RECEIVER] Raw response length: {len(response_str)}")
             
@@ -514,7 +626,7 @@ def stop_receiver_thread():
 
 def send_sms(phone, message_text):
     """Send SMS via GSM modem"""
-    global modem
+    global modem, last_successful_command_time
     
     with modem_lock:
         log_message(f"[SMS] Attempting to send to {phone}")
@@ -537,6 +649,7 @@ def send_sms(phone, message_text):
             
             response = modem.read(100)
             log_message(f"[SMS] CMGS response: {response}")
+            last_successful_command_time = time.time()
             
             if b'>' in response:
                 log_message(f"[SMS] Modem ready, sending message...")
@@ -551,6 +664,7 @@ def send_sms(phone, message_text):
                 response = modem.read(500)
                 log_message(f"[SMS] Send response: {response}")
                 response_str = response.decode('utf-8', errors='ignore')
+                last_successful_command_time = time.time()
                 
                 # Check for success indicators
                 if b'+CMGS:' in response or b'OK' in response:
@@ -580,6 +694,7 @@ def send_sms(phone, message_text):
                         modem.write(b'\x1A')
                         time.sleep(3)
                         response = modem.read(500)
+                        last_successful_command_time = time.time()
                         
                         if b'+CMGS:' in response or b'OK' in response:
                             log_message(f"[SMS] ✓ Message sent successfully on retry")
@@ -599,7 +714,7 @@ def send_sms(phone, message_text):
 
 def delete_sms_from_modem(modem_ids):
     """Delete SMS from modem by ID(s)"""
-    global modem
+    global modem, last_successful_command_time
     
     with modem_lock:
         try:
@@ -615,6 +730,7 @@ def delete_sms_from_modem(modem_ids):
                     time.sleep(0.5)
                     response = modem.read(100)
                     log_message(f"[DELETE] Response: {response}")
+                    last_successful_command_time = time.time()
             else:
                 modem_id = modem_ids
                 log_message(f"[DELETE] Deleting SMS with ID {modem_id} from modem...")
@@ -623,6 +739,7 @@ def delete_sms_from_modem(modem_ids):
                 time.sleep(0.5)
                 response = modem.read(100)
                 log_message(f"[DELETE] Response: {response}")
+                last_successful_command_time = time.time()
             
             log_message(f"[DELETE] ✓ SMS deleted from modem")
             return True, "SMS deleted"
@@ -632,7 +749,7 @@ def delete_sms_from_modem(modem_ids):
 
 def clear_sim_storage():
     """Delete all SMS from modem SIM card storage"""
-    global modem
+    global modem, last_successful_command_time
     
     with modem_lock:
         try:
@@ -644,6 +761,7 @@ def clear_sim_storage():
             time.sleep(2)  # Increased wait time
             response = modem.read(200)
             log_message(f"[CLEAR] Response: {response}")
+            last_successful_command_time = time.time()
             
             # Check for OK in response
             if b'OK' in response or len(response) > 0:
@@ -656,6 +774,7 @@ def clear_sim_storage():
                 time.sleep(1)
                 status_response = modem.read(200)
                 log_message(f"[CLEAR] Storage status: {status_response}")
+                last_successful_command_time = time.time()
                 
                 if b'CPMS' in status_response or b'OK' in status_response:
                     log_message(f"[CLEAR] ✓ All SMS deleted from SIM card")
@@ -921,11 +1040,13 @@ if __name__ == '__main__':
     # Start SMS receiver thread
     if modem_connected:
         start_receiver()
+        start_health_check()
     
     try:
         app.run(debug=False, host='0.0.0.0', port=5000)
     finally:
         stop_receiver_thread()
+        stop_health_check_thread()
         if modem:
             log_message("[MODEM] Closing connection...")
             modem.close()
