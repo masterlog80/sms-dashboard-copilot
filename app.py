@@ -13,7 +13,6 @@ from email.mime.multipart import MIMEMultipart
 import ssl
 import requests
 from requests.auth import HTTPBasicAuth
-import base64
 
 app = Flask(__name__, template_folder='.')
 
@@ -149,8 +148,9 @@ def load_gatewayapi_config():
     
     return {
         'enabled': False,
-        'sender_id': '',
+        'username': '',
         'api_token': '',
+        'sender_id': '',
         'destination_phone': ''
     }
 
@@ -256,8 +256,9 @@ def send_gatewayapi_sms_async(phone, message):
             
             log_message(f"[GATEWAYAPI] Starting async SMS send for message from {phone}")
             
-            sender_id = config['sender_id']
+            username = config['username']
             api_token = config['api_token']
+            sender_id = config['sender_id']
             destination_phone = config['destination_phone']
             
             # Prepare the message for Gatewayapi
@@ -266,8 +267,8 @@ def send_gatewayapi_sms_async(phone, message):
             # Gatewayapi endpoint
             url = "https://gatewayapi.com/rest/mtsms"
             
-            # Use Basic Auth with token as password and empty username
-            auth = HTTPBasicAuth('', api_token)
+            # Use Basic Auth with username and API token as password
+            auth = HTTPBasicAuth(username, api_token)
             
             headers = {
                 'Content-Type': 'application/json'
@@ -284,6 +285,7 @@ def send_gatewayapi_sms_async(phone, message):
             }
             
             log_message(f"[GATEWAYAPI] Sending SMS to {destination_phone} via Gatewayapi")
+            log_message(f"[GATEWAYAPI] Using Basic Auth with username: {username}")
             
             response = requests.post(url, json=payload, headers=headers, auth=auth, timeout=10)
             
@@ -1365,16 +1367,17 @@ def test_gatewayapi_config():
     try:
         data = request.json
         
-        sender_id = data.get('sender_id')
+        username = data.get('username')
         api_token = data.get('api_token')
+        sender_id = data.get('sender_id')
         destination_phone = data.get('destination_phone')
         
         log_message("[GATEWAYAPI] Testing SMS configuration...")
         
         url = "https://gatewayapi.com/rest/mtsms"
         
-        # Use Basic Auth with token as password and empty username
-        auth = HTTPBasicAuth('', api_token)
+        # Use Basic Auth with username and API token as password
+        auth = HTTPBasicAuth(username, api_token)
         
         headers = {
             'Content-Type': 'application/json'
@@ -1391,7 +1394,7 @@ def test_gatewayapi_config():
         }
         
         log_message(f"[GATEWAYAPI] Test: Sending SMS to {destination_phone}")
-        log_message(f"[GATEWAYAPI] Using Basic Auth with token")
+        log_message(f"[GATEWAYAPI] Using Basic Auth with username: {username}")
         
         response = requests.post(url, json=payload, headers=headers, auth=auth, timeout=10)
         
