@@ -108,7 +108,9 @@ def load_forwarding_config():
     try:
         if os.path.exists(forwarding_config_file):
             with open(forwarding_config_file, 'r') as f:
-                return json.load(f)
+                config = json.load(f)
+                log_message(f"[FORWARDING] Loaded config: {config}")
+                return config
     except Exception as e:
         log_message(f"[FORWARDING ERROR] Failed to load config: {str(e)}")
     
@@ -129,9 +131,10 @@ def load_forwarding_config():
 def save_forwarding_config(config):
     """Save forwarding configuration"""
     try:
+        log_message(f"[FORWARDING] Saving config: {config}")
         with open(forwarding_config_file, 'w') as f:
             json.dump(config, f, indent=2)
-        log_message("[FORWARDING] Configuration saved")
+        log_message("[FORWARDING] Configuration saved successfully")
         return True
     except Exception as e:
         log_message(f"[FORWARDING ERROR] Failed to save config: {str(e)}")
@@ -142,7 +145,9 @@ def load_gatewayapi_config():
     try:
         if os.path.exists(gatewayapi_config_file):
             with open(gatewayapi_config_file, 'r') as f:
-                return json.load(f)
+                config = json.load(f)
+                log_message(f"[GATEWAYAPI] Loaded config: {config}")
+                return config
     except Exception as e:
         log_message(f"[GATEWAYAPI ERROR] Failed to load config: {str(e)}")
     
@@ -156,9 +161,10 @@ def load_gatewayapi_config():
 def save_gatewayapi_config(config):
     """Save Gatewayapi configuration"""
     try:
+        log_message(f"[GATEWAYAPI] Saving config: {config}")
         with open(gatewayapi_config_file, 'w') as f:
             json.dump(config, f, indent=2)
-        log_message("[GATEWAYAPI] Configuration saved")
+        log_message("[GATEWAYAPI] Configuration saved successfully")
         return True
     except Exception as e:
         log_message(f"[GATEWAYAPI ERROR] Failed to save config: {str(e)}")
@@ -1212,6 +1218,7 @@ def save_forwarding_config_api():
     """Save forwarding configuration"""
     try:
         data = request.json
+        log_message(f"[API] Received forwarding save request: {data}")
         
         if save_forwarding_config(data):
             return jsonify({
@@ -1342,6 +1349,7 @@ def save_gatewayapi_config_api():
     """Save Gatewayapi configuration"""
     try:
         data = request.json
+        log_message(f"[API] Received gatewayapi save request: {data}")
         
         if save_gatewayapi_config(data):
             return jsonify({
