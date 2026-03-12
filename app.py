@@ -1,4 +1,6 @@
-from flask import Flask, render_template, request, jsonify
+#from flask import Flask, render_template, request, jsonify
+#import os
+from flask import Flask, render_template, request, jsonify, send_from_directory
 import os
 import json
 import serial
@@ -15,6 +17,18 @@ import requests
 from requests.auth import HTTPBasicAuth
 
 app = Flask(__name__, template_folder='.')
+
+@app.route('/favicon.svg')
+def favicon_svg():
+    return send_from_directory(app.root_path, 'favicon.svg', mimetype='image/svg+xml')
+
+@app.route('/favicon.ico')
+def favicon_ico():
+    return send_from_directory(app.root_path, 'favicon.ico', mimetype='image/x-icon')
+
+@app.route('/favicon.png')
+def favicon_png():
+    return send_from_directory(app.root_path, 'favicon.png', mimetype='image/png')
 
 # Setup logging
 log_file = '/app/data/modem.log'
