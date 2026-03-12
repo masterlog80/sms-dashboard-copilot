@@ -71,6 +71,32 @@ messages = {
     'received': []
 }
 
+# Messages storage file
+messages_file = '/app/data/messages.json'
+
+def load_messages_from_file():
+    """Load messages from persistent storage"""
+    global messages
+    try:
+        if os.path.exists(messages_file):
+            with open(messages_file, 'r') as f:
+                data = json.load(f)
+                messages = data
+                log_message(f"[STORAGE] Loaded {len(messages['sent'])} sent and {len(messages['received'])} received messages from disk")
+        else:
+            log_message("[STORAGE] No message file found, starting fresh")
+    except Exception as e:
+        log_message(f"[STORAGE ERROR] Failed to load messages: {str(e)}")
+
+def save_messages_to_file():
+    """Save messages to persistent storage"""
+    global messages
+    try:
+        with open(messages_file, 'w') as f:
+            json.dump(messages, f, indent=2)
+    except Exception as e:
+        log_message(f"[STORAGE ERROR] Failed to save messages: {str(e)}")
+
 # Track modem SMS indices for deletion
 sms_modem_indices = {}  # Map of message index to modem message ID
 
@@ -387,6 +413,7 @@ def read_sms_from_sim():
                                             if msg_key not in pending_parts:
                                                 pending_parts[msg_key] = {
                                                     'parts': [],
+                                                    'modem_ids': [],
                                                     'first_seen': time.time()
                                                 }
                                             
@@ -394,6 +421,7 @@ def read_sms_from_sim():
                                                 'id': msg_id,
                                                 'text': decoded_text,
                                             })
+                                            pending_parts[msg_key]['modem_ids'].append(msg_id)
                                             
                                             processed_messages.add(msg_id)
                                             log_message(f"[RECEIVER] Part {len(pending_parts[msg_key]['parts'])} from {phone}: {decoded_text[:30]}...")
@@ -410,6 +438,7 @@ def read_sms_from_sim():
             
             for msg_key, msg_data in list(pending_parts.items()):
                 parts_list = msg_data['parts']
+                modem_ids = msg_data['modem_ids']
                 first_seen = msg_data['first_seen']
                 phone, timestamp_part = msg_key
                 
@@ -425,7 +454,7 @@ def read_sms_from_sim():
                     )
                     
                     if not already_stored and combined_text:
-                        # Store combined message
+                        # Store combined message locally
                         message = {
                             'type': 'received',
                             'phone': phone,
@@ -434,14 +463,14 @@ def read_sms_from_sim():
                             'status': 'received'
                         }
                         
-                        msg_index = len(messages['received'])
                         messages['received'].append(message)
-                        
-                        # Store all part IDs for deletion
-                        part_ids = [p['id'] for p in parts_list]
-                        sms_modem_indices[msg_index] = part_ids
+                        save_messages_to_file()
                         
                         log_message(f"[RECEIVER] ✓ COMBINED SMS from {phone} ({len(parts_list)} parts): {combined_text[:50]}")
+                        log_message(f"[RECEIVER] Message stored locally and will be deleted from SIM card")
+                        
+                        # Delete from modem to free up space
+                        delete_sms_from_modem(modem_ids)
                         
                         keys_to_remove.append(msg_key)
             
@@ -674,7 +703,7 @@ def send_message():
         # Send via modem
         success, status = send_sms(phone, message_text)
         
-        # Store message
+        # Store message locally
         message = {
             'type': 'sent',
             'phone': phone,
@@ -684,6 +713,7 @@ def send_message():
         }
         
         messages['sent'].append(message)
+        save_messages_to_file()
         
         if success:
             log_message(f"[API] ✓ SMS stored and sent")
@@ -708,7 +738,7 @@ def send_message():
 
 @app.route('/api/message/<int:message_index>', methods=['DELETE'])
 def delete_message(message_index):
-    """Delete a message from the list and modem"""
+    """Delete a message from the list"""
     try:
         log_message(f"[API] Delete request for message index {message_index}")
         
@@ -721,28 +751,20 @@ def delete_message(message_index):
         
         message = all_messages[message_index]
         
-        # If it's a received message, try to delete from modem
+        # If it's a received message, remove from received
         if message['type'] == 'received':
-            # Find the modem ID(s)
             for idx, msg in enumerate(messages['received']):
                 if msg == message:
-                    if idx in sms_modem_indices:
-                        modem_ids = sms_modem_indices[idx]
-                        success, status = delete_sms_from_modem(modem_ids)
-                        if not success:
-                            log_message(f"[API] Warning: Failed to delete from modem but removing from list")
-                    
-                    # Remove from in-memory storage
                     messages['received'].pop(idx)
-                    if idx in sms_modem_indices:
-                        del sms_modem_indices[idx]
                     break
         else:
-            # For sent messages, just remove from memory
+            # For sent messages, remove from sent
             for idx, msg in enumerate(messages['sent']):
                 if msg == message:
                     messages['sent'].pop(idx)
                     break
+        
+        save_messages_to_file()
         
         log_message(f"[API] ✓ Message deleted")
         return jsonify({
@@ -770,9 +792,9 @@ def clear_sim_storage_api():
             # Also clear the in-memory storage
             messages['sent'].clear()
             messages['received'].clear()
-            sms_modem_indices.clear()
             pending_parts.clear()
             processed_messages.clear()
+            save_messages_to_file()
             
             log_message(f"[API] ✓ SIM storage and dashboard cleared")
             return jsonify({
@@ -885,6 +907,9 @@ if __name__ == '__main__':
     log_message("="*50)
     log_message("SMS DASHBOARD STARTING...")
     log_message("="*50)
+    
+    # Load messages from persistent storage
+    load_messages_from_file()
     
     # Initialize modem on startup
     init_modem()
