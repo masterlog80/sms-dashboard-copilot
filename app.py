@@ -221,6 +221,47 @@ Sent by SMS Dashboard Copilot
     email_thread.start()
     log_message("[FORWARDING] Email send thread started")
 
+def delete_sms_from_modem_async(modem_ids):
+    """Delete SMS from modem asynchronously (non-blocking)"""
+    def delete_sms():
+        global modem, last_successful_command_time
+        
+        with modem_lock:
+            try:
+                if modem is None or not modem_connected:
+                    log_message("[DELETE] Modem not connected, skipping delete")
+                    return False
+                
+                if isinstance(modem_ids, list):
+                    for modem_id in modem_ids:
+                        log_message(f"[DELETE] Deleting SMS with ID {modem_id} from modem...")
+                        cmd = f'AT+CMGD={modem_id}\r\n'
+                        modem.write(cmd.encode())
+                        time.sleep(0.5)
+                        response = modem.read(100)
+                        log_message(f"[DELETE] Response: {response}")
+                        last_successful_command_time = time.time()
+                else:
+                    modem_id = modem_ids
+                    log_message(f"[DELETE] Deleting SMS with ID {modem_id} from modem...")
+                    cmd = f'AT+CMGD={modem_id}\r\n'
+                    modem.write(cmd.encode())
+                    time.sleep(0.5)
+                    response = modem.read(100)
+                    log_message(f"[DELETE] Response: {response}")
+                    last_successful_command_time = time.time()
+                
+                log_message(f"[DELETE] ��� SMS deleted from modem")
+                return True
+            except Exception as e:
+                log_message(f"[DELETE ERROR] {str(e)}")
+                return False
+    
+    # Delete SMS in separate thread to avoid blocking
+    delete_thread = threading.Thread(target=delete_sms, daemon=True)
+    delete_thread.start()
+    log_message("[DELETE] SMS delete thread started")
+
 # Track SMS parts for concatenation
 pending_parts = {}
 
@@ -666,19 +707,41 @@ def read_sms_from_sim():
                         save_messages_to_file()
                         
                         log_message(f"[RECEIVER] ✓ COMBINED SMS from {phone} ({len(parts_list)} parts): {combined_text[:50]}")
-                        log_message(f"[RECEIVER] Message stored locally and will be deleted from SIM card")
+                        log_message(f"[RECEIVER] Message stored locally, will be deleted from SIM card asynchronously")
                         
-                        # Start email forwarding in background thread (release modem lock)
-                        send_forwarding_email_async(phone, combined_text)
-                        
-                        delete_sms_from_modem(modem_ids)
+                        # Release the modem lock before doing async operations
                         keys_to_remove.append(msg_key)
             
             for key in keys_to_remove:
+                modem_ids = pending_parts[key]['modem_ids']
+                phone = key[0]
+                message = ''.join([p['text'] for p in pending_parts[key]['parts']])
                 del pending_parts[key]
                 
+                # Start async operations OUTSIDE the lock
         except Exception as e:
             log_message(f"[RECEIVER ERROR] {str(e)}")
+        
+        # Process deletions and email forwarding AFTER releasing the lock
+        for key in list(pending_parts.keys()):
+            if key not in pending_parts:  # Already processed above
+                continue
+        
+    # Now call async operations outside the lock
+    for msg_key in keys_to_remove:
+        if msg_key in pending_parts:
+            continue  # Already processed
+        modem_ids = pending_parts.get(msg_key, {}).get('modem_ids', [])
+        if not modem_ids:
+            continue
+        phone = msg_key[0]
+        combined_text = ''.join([p['text'] for p in pending_parts.get(msg_key, {}).get('parts', [])])
+        
+        # Start email forwarding in background thread
+        send_forwarding_email_async(phone, combined_text)
+        
+        # Start SMS deletion in background thread
+        delete_sms_from_modem_async(modem_ids)
 
 def receive_sms_loop():
     """Continuously poll for incoming SMS from SIM card"""
@@ -788,40 +851,6 @@ def send_sms(phone, message_text):
         except Exception as e:
             log_message(f"[SMS ERROR] {str(e)}")
             return False, f"Error sending SMS: {str(e)}"
-
-def delete_sms_from_modem(modem_ids):
-    """Delete SMS from modem by ID(s)"""
-    global modem, last_successful_command_time
-    
-    with modem_lock:
-        try:
-            if modem is None or not modem_connected:
-                return False, "Modem not connected"
-            
-            if isinstance(modem_ids, list):
-                for modem_id in modem_ids:
-                    log_message(f"[DELETE] Deleting SMS with ID {modem_id} from modem...")
-                    cmd = f'AT+CMGD={modem_id}\r\n'
-                    modem.write(cmd.encode())
-                    time.sleep(0.5)
-                    response = modem.read(100)
-                    log_message(f"[DELETE] Response: {response}")
-                    last_successful_command_time = time.time()
-            else:
-                modem_id = modem_ids
-                log_message(f"[DELETE] Deleting SMS with ID {modem_id} from modem...")
-                cmd = f'AT+CMGD={modem_id}\r\n'
-                modem.write(cmd.encode())
-                time.sleep(0.5)
-                response = modem.read(100)
-                log_message(f"[DELETE] Response: {response}")
-                last_successful_command_time = time.time()
-            
-            log_message(f"[DELETE] ✓ SMS deleted from modem")
-            return True, "SMS deleted"
-        except Exception as e:
-            log_message(f"[DELETE ERROR] {str(e)}")
-            return False, str(e)
 
 def clear_sim_storage():
     """Delete all SMS from modem SIM card storage"""
