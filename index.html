@@ -572,6 +572,7 @@
             display: flex;
             align-items: center;
             gap: 15px;
+            margin-bottom: 20px;
         }
         
         .switch {
@@ -704,6 +705,10 @@
             .nav-tab {
                 width: 100%;
             }
+            
+            .two-column {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -714,6 +719,7 @@
             <p class="datetime" id="datetime">Current Date and Time (UTC): Loading...</p>
         </header>
         
+        <!-- NAVIGATION TABS -->
         <div class="nav-tabs">
             <button class="nav-tab active" onclick="switchPage('dashboard')">📊 Dashboard</button>
             <button class="nav-tab" onclick="switchPage('forwarding')">📧 Forwarding</button>
