@@ -12,6 +12,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import ssl
 import requests
+from requests.auth import HTTPBasicAuth
+import base64
 
 app = Flask(__name__, template_folder='.')
 
@@ -264,8 +266,10 @@ def send_gatewayapi_sms_async(phone, message):
             # Gatewayapi endpoint
             url = "https://gatewayapi.com/rest/mtsms"
             
+            # Use Basic Auth with token as password and empty username
+            auth = HTTPBasicAuth('', api_token)
+            
             headers = {
-                'Authorization': f'Bearer {api_token}',
                 'Content-Type': 'application/json'
             }
             
@@ -281,7 +285,7 @@ def send_gatewayapi_sms_async(phone, message):
             
             log_message(f"[GATEWAYAPI] Sending SMS to {destination_phone} via Gatewayapi")
             
-            response = requests.post(url, json=payload, headers=headers, timeout=10)
+            response = requests.post(url, json=payload, headers=headers, auth=auth, timeout=10)
             
             log_message(f"[GATEWAYAPI] Response status: {response.status_code}")
             log_message(f"[GATEWAYAPI] Response: {response.text}")
@@ -1369,8 +1373,10 @@ def test_gatewayapi_config():
         
         url = "https://gatewayapi.com/rest/mtsms"
         
+        # Use Basic Auth with token as password and empty username
+        auth = HTTPBasicAuth('', api_token)
+        
         headers = {
-            'Authorization': f'Bearer {api_token}',
             'Content-Type': 'application/json'
         }
         
@@ -1385,8 +1391,9 @@ def test_gatewayapi_config():
         }
         
         log_message(f"[GATEWAYAPI] Test: Sending SMS to {destination_phone}")
+        log_message(f"[GATEWAYAPI] Using Basic Auth with token")
         
-        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        response = requests.post(url, json=payload, headers=headers, auth=auth, timeout=10)
         
         log_message(f"[GATEWAYAPI] Response status: {response.status_code}")
         log_message(f"[GATEWAYAPI] Response: {response.text}")
