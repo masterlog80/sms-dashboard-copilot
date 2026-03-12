@@ -135,20 +135,21 @@ def save_forwarding_config(config):
         log_message(f"[FORWARDING ERROR] Failed to save config: {str(e)}")
         return False
 
-def send_forwarding_email(phone, message):
-    """Send email via SMTP with received SMS"""
-    try:
-        config = load_forwarding_config()
-        
-        if not config['enabled']:
-            log_message("[FORWARDING] Email forwarding is disabled")
-            return False
-        
-        log_message(f"[FORWARDING] Sending email for SMS from {phone}")
-        
-        # Prepare subject and body
-        subject = config['subject'].replace('{phone}', phone).replace('{timestamp}', datetime.now().isoformat())
-        body = f"""
+def send_forwarding_email_async(phone, message):
+    """Send email via SMTP with received SMS (async - non-blocking)"""
+    def send_email():
+        try:
+            config = load_forwarding_config()
+            
+            if not config['enabled']:
+                log_message("[FORWARDING] Email forwarding is disabled, skipping")
+                return False
+            
+            log_message(f"[FORWARDING] Sending email for SMS from {phone}")
+            
+            # Prepare subject and body
+            subject = config['subject'].replace('{phone}', phone).replace('{timestamp}', datetime.now().isoformat())
+            body = f"""
 New SMS Received
 
 From: {phone}
@@ -160,58 +161,62 @@ Message:
 ---
 Sent by SMS Dashboard Copilot
 """
-        
-        # Create message
-        msg = MIMEMultipart()
-        msg['From'] = f"{config['sender_name']} <{config['sender_address']}>"
-        msg['To'] = config['destination_address']
-        msg['Subject'] = subject
-        msg.attach(MIMEText(body, 'plain'))
-        
-        # Connect and send
-        smtp_server = config['smtp_server']
-        smtp_port = config['smtp_port']
-        encryption = config['encryption']
-        protocol = config['encryption_protocol']
-        username = config['smtp_username']
-        password = config['smtp_password']
-        
-        log_message(f"[FORWARDING] Connecting to {smtp_server}:{smtp_port} with {encryption}")
-        
-        if encryption == 'SSL':
-            context = ssl.create_default_context()
-            if protocol == 'TLSv1.2':
-                context.minimum_version = ssl.TLSVersion.TLSv1_2
-                context.maximum_version = ssl.TLSVersion.TLSv1_2
-            elif protocol == 'TLSv1.3':
-                context.minimum_version = ssl.TLSVersion.TLSv1_3
             
-            server = smtplib.SMTP_SSL(smtp_server, smtp_port, context=context)
-        else:
-            server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
-            if encryption == 'TLS':
+            # Create message
+            msg = MIMEMultipart()
+            msg['From'] = f"{config['sender_name']} <{config['sender_address']}>"
+            msg['To'] = config['destination_address']
+            msg['Subject'] = subject
+            msg.attach(MIMEText(body, 'plain'))
+            
+            # Connect and send
+            smtp_server = config['smtp_server']
+            smtp_port = config['smtp_port']
+            encryption = config['encryption']
+            protocol = config['encryption_protocol']
+            username = config['smtp_username']
+            password = config['smtp_password']
+            
+            log_message(f"[FORWARDING] Connecting to {smtp_server}:{smtp_port} with {encryption}")
+            
+            if encryption == 'SSL':
                 context = ssl.create_default_context()
                 if protocol == 'TLSv1.2':
                     context.minimum_version = ssl.TLSVersion.TLSv1_2
                     context.maximum_version = ssl.TLSVersion.TLSv1_2
                 elif protocol == 'TLSv1.3':
                     context.minimum_version = ssl.TLSVersion.TLSv1_3
-                server.starttls(context=context)
-        
-        # Login
-        log_message(f"[FORWARDING] Logging in as {username}")
-        server.login(username, password)
-        
-        # Send
-        server.send_message(msg)
-        server.quit()
-        
-        log_message(f"[FORWARDING] ✓ Email sent successfully to {config['destination_address']}")
-        return True
-        
-    except Exception as e:
-        log_message(f"[FORWARDING ERROR] Failed to send email: {str(e)}")
-        return False
+                
+                server = smtplib.SMTP_SSL(smtp_server, smtp_port, context=context, timeout=10)
+            else:
+                server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
+                if encryption == 'TLS':
+                    context = ssl.create_default_context()
+                    if protocol == 'TLSv1.2':
+                        context.minimum_version = ssl.TLSVersion.TLSv1_2
+                        context.maximum_version = ssl.TLSVersion.TLSv1_2
+                    elif protocol == 'TLSv1.3':
+                        context.minimum_version = ssl.TLSVersion.TLSv1_3
+                    server.starttls(context=context)
+            
+            # Login
+            log_message(f"[FORWARDING] Logging in as {username}")
+            server.login(username, password)
+            
+            # Send
+            server.send_message(msg)
+            server.quit()
+            
+            log_message(f"[FORWARDING] ✓ Email sent successfully to {config['destination_address']}")
+            return True
+            
+        except Exception as e:
+            log_message(f"[FORWARDING ERROR] Failed to send email: {str(e)}")
+            return False
+    
+    # Send email in separate thread to avoid blocking SMS reception
+    email_thread = threading.Thread(target=send_email, daemon=True)
+    email_thread.start()
 
 # Track SMS parts for concatenation
 pending_parts = {}
@@ -657,11 +662,7 @@ def read_sms_from_sim():
                         log_message(f"[RECEIVER] ✓ COMBINED SMS from {phone} ({len(parts_list)} parts): {combined_text[:50]}")
                         log_message(f"[RECEIVER] Message stored locally and will be deleted from SIM card")
                         
-                        # Send forwarding email if enabled
-                        send_forwarding_email(phone, combined_text)
-                        
                         delete_sms_from_modem(modem_ids)
-                        
                         keys_to_remove.append(msg_key)
             
             for key in keys_to_remove:
