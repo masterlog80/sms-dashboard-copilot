@@ -862,7 +862,7 @@
                     <label>Email Forwarding Status:</label>
                     <div class="toggle-switch">
                         <label class="switch">
-                            <input type="checkbox" id="forwarding-toggle" onchange="updateForwardingUI()">
+                            <input type="checkbox" id="forwarding-toggle" onchange="autoSaveForwarding()">
                             <span class="slider"></span>
                         </label>
                         <span class="status-badge disabled" id="forwarding-status">Disabled</span>
@@ -973,7 +973,7 @@
                     <label>SMS Forwarding via Gatewayapi Status:</label>
                     <div class="toggle-switch">
                         <label class="switch">
-                            <input type="checkbox" id="gatewayapi-toggle" onchange="updateGatewayapiUI()">
+                            <input type="checkbox" id="gatewayapi-toggle" onchange="autoSaveGatewayapi()">
                             <span class="slider"></span>
                         </label>
                         <span class="status-badge disabled" id="gatewayapi-status">Disabled</span>
@@ -1343,7 +1343,6 @@
         
         // ===== EMAIL FORWARDING FUNCTIONS =====
         
-        // Update Forwarding UI
         function updateForwardingUI() {
             const toggle = document.getElementById('forwarding-toggle');
             const formWrapper = document.getElementById('forwarding-form-wrapper');
@@ -1360,6 +1359,11 @@
                 status.classList.add('disabled');
                 status.classList.remove('enabled');
             }
+        }
+        
+        function autoSaveForwarding() {
+            updateForwardingUI();
+            saveForwardingConfig();
         }
         
         function updateEncryption() {
@@ -1401,7 +1405,6 @@
             .then(data => {
                 if (data.status === 'success') {
                     showForwardingAlert('✅ Email configuration saved successfully!', 'success');
-                    loadForwardingConfig();
                 } else {
                     showForwardingAlert(`❌ Error: ${data.message}`, 'error');
                 }
@@ -1418,15 +1421,11 @@
                 .then(data => {
                     if (data.status === 'success') {
                         const config = data.config;
-                        
-                        // Set toggle value
                         const toggle = document.getElementById('forwarding-toggle');
-                        toggle.checked = config.enabled === true;
+                        toggle.checked = config.enabled;
                         
-                        // Manually update UI instead of using change event
                         updateForwardingUI();
                         
-                        // Load other values
                         document.getElementById('sender-address').value = config.sender_address || '';
                         document.getElementById('sender-name').value = config.sender_name || '';
                         document.getElementById('subject').value = config.subject || '';
@@ -1499,7 +1498,6 @@
         
         // ===== GATEWAYAPI SMS FORWARDING FUNCTIONS =====
         
-        // Update Gatewayapi UI
         function updateGatewayapiUI() {
             const toggle = document.getElementById('gatewayapi-toggle');
             const formWrapper = document.getElementById('gatewayapi-form-wrapper');
@@ -1516,6 +1514,11 @@
                 status.classList.add('disabled');
                 status.classList.remove('enabled');
             }
+        }
+        
+        function autoSaveGatewayapi() {
+            updateGatewayapiUI();
+            saveGatewayapiConfig();
         }
         
         function saveGatewayapiConfig() {
@@ -1547,7 +1550,6 @@
             .then(data => {
                 if (data.status === 'success') {
                     showGatewayapiAlert('✅ SMS configuration saved successfully!', 'success');
-                    loadGatewayapiConfig();
                 } else {
                     showGatewayapiAlert(`❌ Error: ${data.message}`, 'error');
                 }
@@ -1564,15 +1566,11 @@
                 .then(data => {
                     if (data.status === 'success') {
                         const config = data.config;
-                        
-                        // Set toggle value
                         const toggle = document.getElementById('gatewayapi-toggle');
-                        toggle.checked = config.enabled === true;
+                        toggle.checked = config.enabled;
                         
-                        // Manually update UI instead of using change event
                         updateGatewayapiUI();
                         
-                        // Load other values
                         document.getElementById('gatewayapi-token').value = config.api_token || '';
                         document.getElementById('gatewayapi-sender-id').value = config.sender_id || '';
                         document.getElementById('gatewayapi-phone').value = config.destination_phone || '';
