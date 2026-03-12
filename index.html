@@ -43,6 +43,45 @@
             font-size: 1.1em;
         }
         
+        .nav-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        
+        .nav-tab {
+            padding: 12px 24px;
+            background: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 500;
+            color: #333;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.3s;
+        }
+        
+        .nav-tab:hover {
+            background: #f5f5f5;
+            transform: translateY(-2px);
+        }
+        
+        .nav-tab.active {
+            background: #667eea;
+            color: white;
+            box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
+        }
+        
+        .page {
+            display: none;
+        }
+        
+        .page.active {
+            display: block;
+        }
+        
         .dashboard {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -162,6 +201,25 @@
         
         .sca-btn:hover {
             background: #0b7dda;
+        }
+        
+        .save-btn {
+            background: #4caf50;
+        }
+        
+        .save-btn:hover {
+            background: #45a049;
+        }
+        
+        .test-btn {
+            background: #ff9800;
+            font-size: 0.9em;
+            padding: 10px 20px;
+            margin-top: 10px;
+        }
+        
+        .test-btn:hover {
+            background: #f57c00;
         }
         
         .messages-list {
@@ -503,9 +561,101 @@
             display: block;
         }
         
+        .alert.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+            display: block;
+        }
+        
+        .toggle-switch {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+        
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: 0.4s;
+            border-radius: 34px;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: 0.4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .slider {
+            background-color: #667eea;
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        
+        .status-badge.enabled {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-badge.disabled {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .section-divider {
+            margin: 30px 0;
+            border-top: 2px solid #e0e0e0;
+            padding-top: 20px;
+        }
+        
+        .two-column {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
         @media (max-width: 1200px) {
             .dashboard.three-column {
                 grid-template-columns: 1fr 1fr;
+            }
+            
+            .two-column {
+                grid-template-columns: 1fr;
             }
         }
         
@@ -546,6 +696,14 @@
             .sca-presets {
                 grid-template-columns: 1fr;
             }
+            
+            .nav-tabs {
+                flex-direction: column;
+            }
+            
+            .nav-tab {
+                width: 100%;
+            }
         }
     </style>
 </head>
@@ -556,120 +714,257 @@
             <p class="datetime" id="datetime">Current Date and Time (UTC): Loading...</p>
         </header>
         
-        <div class="dashboard three-column">
-            <!-- Statistics Card -->
-            <div class="card">
-                <h2>📊 Statistics</h2>
-                <div class="stats">
-                    <div class="stat-item">
-                        <div class="stat-number" id="total-messages">0</div>
-                        <div class="stat-label">Total Messages</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-number" id="unread-messages">0</div>
-                        <div class="stat-label">Unread</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Settings Card -->
-            <div class="card">
-                <h2>⚙️ Settings</h2>
-                
-                <!-- SMS Service Center -->
-                <div class="sca-container">
-                    <div class="sca-info">
-                        <div class="sca-label">📱 SMS Service Center (SCA):</div>
-                        <div class="sca-value" id="sca-display">Loading...</div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="sca-input">Set Custom SCA:</label>
-                        <input type="tel" id="sca-input" placeholder="+393935000001" value="">
-                    </div>
-                    
-                    <div class="sca-presets">
-                        <button class="preset-btn" onclick="setSCAPreset('+393935000001')">Vodafone 🇮🇹</button>
-                        <button class="preset-btn" onclick="setSCAPreset('+393803020020')">TIM 🇮🇹</button>
-                        <button class="preset-btn" onclick="setSCAPreset('+393207300000')">Wind 3 🇮🇹</button>
-                        <button class="preset-btn" onclick="setSCAPreset('+393491000001')">Tre 🇮🇹</button>
-                    </div>
-                    
-                    <button class="sca-btn" onclick="updateSCA()">✅ Update SCA</button>
-                </div>
-            </div>
-            
-            <!-- Status Card -->
-            <div class="card">
-                <h2>⚙️ Status</h2>
-                <div class="status">
-                    <div class="status-indicator"></div>
-                    <div class="status-text">GSM Modem: Connected</div>
-                </div>
-                <div style="margin-top: 15px; color: #666;">
-                    <p><strong>Port:</strong> /dev/ttyUSB0</p>
-                    <p><strong>Baud Rate:</strong> 9600</p>
-                </div>
-                
-                <!-- Signal Strength -->
-                <div class="signal-container">
-                    <div class="signal-info" id="signal-info">
-                        <div class="signal-label">📶 Signal Strength:</div>
-                        <div class="signal-value" id="signal-strength">Loading...</div>
-                        <div class="signal-bars" id="signal-bars">
-                            <div class="signal-bar"></div>
-                            <div class="signal-bar"></div>
-                            <div class="signal-bar"></div>
-                            <div class="signal-bar"></div>
-                            <div class="signal-bar"></div>
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="switchPage('dashboard')">📊 Dashboard</button>
+            <button class="nav-tab" onclick="switchPage('forwarding')">📧 Forwarding</button>
+        </div>
+        
+        <!-- DASHBOARD PAGE -->
+        <div id="dashboard-page" class="page active">
+            <div class="dashboard three-column">
+                <!-- Statistics Card -->
+                <div class="card">
+                    <h2>📊 Statistics</h2>
+                    <div class="stats">
+                        <div class="stat-item">
+                            <div class="stat-number" id="total-messages">0</div>
+                            <div class="stat-label">Total Messages</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number" id="unread-messages">0</div>
+                            <div class="stat-label">Unread</div>
                         </div>
                     </div>
                 </div>
                 
-                <!-- SIM Card Usage Progress -->
-                <div class="progress-container">
-                    <div class="progress-label">
-                        <span>💾 SIM Card Storage</span>
-                        <span id="sim-usage">0/20</span>
-                    </div>
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="sim-progress" style="width: 0%">0%</div>
+                <!-- Settings Card -->
+                <div class="card">
+                    <h2>⚙️ Settings</h2>
+                    
+                    <!-- SMS Service Center -->
+                    <div class="sca-container">
+                        <div class="sca-info">
+                            <div class="sca-label">📱 SMS Service Center (SCA):</div>
+                            <div class="sca-value" id="sca-display">Loading...</div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="sca-input">Set Custom SCA:</label>
+                            <input type="tel" id="sca-input" placeholder="+393935000001" value="">
+                        </div>
+                        
+                        <div class="sca-presets">
+                            <button class="preset-btn" onclick="setSCAPreset('+393935000001')">Vodafone 🇮🇹</button>
+                            <button class="preset-btn" onclick="setSCAPreset('+393803020020')">TIM 🇮🇹</button>
+                            <button class="preset-btn" onclick="setSCAPreset('+393207300000')">Wind 3 🇮🇹</button>
+                            <button class="preset-btn" onclick="setSCAPreset('+393491000001')">Tre 🇮🇹</button>
+                        </div>
+                        
+                        <button class="sca-btn" onclick="updateSCA()">✅ Update SCA</button>
                     </div>
                 </div>
                 
-                <button class="clear-btn" onclick="clearSIMStorage()" style="margin-top: 15px;">🗑️ Clear SIM Storage</button>
+                <!-- Status Card -->
+                <div class="card">
+                    <h2>⚙️ Status</h2>
+                    <div class="status">
+                        <div class="status-indicator"></div>
+                        <div class="status-text">GSM Modem: Connected</div>
+                    </div>
+                    <div style="margin-top: 15px; color: #666;">
+                        <p><strong>Port:</strong> /dev/ttyUSB0</p>
+                        <p><strong>Baud Rate:</strong> 9600</p>
+                    </div>
+                    
+                    <!-- Signal Strength -->
+                    <div class="signal-container">
+                        <div class="signal-info" id="signal-info">
+                            <div class="signal-label">📶 Signal Strength:</div>
+                            <div class="signal-value" id="signal-strength">Loading...</div>
+                            <div class="signal-bars" id="signal-bars">
+                                <div class="signal-bar"></div>
+                                <div class="signal-bar"></div>
+                                <div class="signal-bar"></div>
+                                <div class="signal-bar"></div>
+                                <div class="signal-bar"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- SIM Card Usage Progress -->
+                    <div class="progress-container">
+                        <div class="progress-label">
+                            <span>💾 SIM Card Storage</span>
+                            <span id="sim-usage">0/20</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="sim-progress" style="width: 0%">0%</div>
+                        </div>
+                    </div>
+                    
+                    <button class="clear-btn" onclick="clearSIMStorage()" style="margin-top: 15px;">🗑️ Clear SIM Storage</button>
+                </div>
+            </div>
+            
+            <div class="dashboard">
+                <!-- Send SMS Card -->
+                <div class="card">
+                    <h2>✉️ Send SMS</h2>
+                    <div id="alert" class="alert"></div>
+                    <form id="sms-form">
+                        <div class="form-group">
+                            <label for="phone">Phone Number:</label>
+                            <input type="tel" id="phone" name="phone" placeholder="+1234567890" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="message">Message:</label>
+                            <textarea id="message" name="message" placeholder="Type your message..." required></textarea>
+                        </div>
+                        <button type="submit" id="send-btn">Send SMS</button>
+                    </form>
+                </div>
+                
+                <!-- Messages Card -->
+                <div class="card">
+                    <h2>📬 Recent Messages</h2>
+                    <div class="messages-list" id="messages-list">
+                        <p style="color: #999;">No messages yet...</p>
+                    </div>
+                </div>
             </div>
         </div>
         
-        <div class="dashboard">
-            <!-- Send SMS Card -->
+        <!-- FORWARDING PAGE -->
+        <div id="forwarding-page" class="page">
             <div class="card">
-                <h2>✉️ Send SMS</h2>
-                <div id="alert" class="alert"></div>
-                <form id="sms-form">
-                    <div class="form-group">
-                        <label for="phone">Phone Number:</label>
-                        <input type="tel" id="phone" name="phone" placeholder="+1234567890" required>
+                <h2>📧 Email Forwarding Configuration</h2>
+                <div id="forwarding-alert" class="alert"></div>
+                
+                <!-- Enable/Disable Toggle -->
+                <div class="form-group">
+                    <label>Email Forwarding Status:</label>
+                    <div class="toggle-switch">
+                        <div class="switch">
+                            <input type="checkbox" id="forwarding-toggle" onchange="toggleForwarding()">
+                            <span class="slider"></span>
+                        </div>
+                        <span class="status-badge disabled" id="forwarding-status">Disabled</span>
                     </div>
-                    <div class="form-group">
-                        <label for="message">Message:</label>
-                        <textarea id="message" name="message" placeholder="Type your message..." required></textarea>
+                </div>
+                
+                <div class="section-divider"></div>
+                
+                <!-- Email Configuration Form -->
+                <form id="forwarding-form">
+                    <div class="two-column">
+                        <!-- Left Column -->
+                        <div>
+                            <h3 style="color: #667eea; margin-bottom: 20px;">Sender Configuration</h3>
+                            
+                            <div class="form-group">
+                                <label for="sender-address">From Address (Sender Email):</label>
+                                <input type="email" id="sender-address" placeholder="noreply@example.com" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="sender-name">From Name:</label>
+                                <input type="text" id="sender-name" placeholder="SMS Copilot" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="subject">Email Subject:</label>
+                                <input type="text" id="subject" placeholder="New SMS Received: {phone}" required>
+                                <small style="color: #666; margin-top: 5px; display: block;">Available variables: {phone}, {timestamp}</small>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="destination-address">To Address (Recipient Email):</label>
+                                <input type="email" id="destination-address" placeholder="recipient@example.com" required>
+                            </div>
+                        </div>
+                        
+                        <!-- Right Column -->
+                        <div>
+                            <h3 style="color: #667eea; margin-bottom: 20px;">SMTP Server Configuration</h3>
+                            
+                            <div class="form-group">
+                                <label for="smtp-server">SMTP Server Address:</label>
+                                <input type="text" id="smtp-server" placeholder="smtp.gmail.com" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="smtp-port">SMTP Port:</label>
+                                <input type="number" id="smtp-port" placeholder="587" value="587" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="encryption">Encryption:</label>
+                                <select id="encryption" onchange="updateEncryption()" required>
+                                    <option value="">-- Select Encryption --</option>
+                                    <option value="TLS">TLS</option>
+                                    <option value="SSL">SSL</option>
+                                    <option value="NONE">NONE</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group" id="protocol-group" style="display: none;">
+                                <label for="encryption-protocol">Encryption Protocol:</label>
+                                <select id="encryption-protocol" required>
+                                    <option value="">-- Select Protocol --</option>
+                                    <option value="TLSv1.2">TLSv1.2</option>
+                                    <option value="TLSv1.3">TLSv1.3</option>
+                                </select>
+                            </div>
+                        </div>
                     </div>
-                    <button type="submit" id="send-btn">Send SMS</button>
+                    
+                    <div class="section-divider"></div>
+                    
+                    <h3 style="color: #667eea; margin-bottom: 20px;">SMTP Authentication</h3>
+                    
+                    <div class="two-column">
+                        <div class="form-group">
+                            <label for="smtp-username">SMTP Username:</label>
+                            <input type="text" id="smtp-username" placeholder="your-email@gmail.com" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="smtp-password">SMTP Password:</label>
+                            <input type="password" id="smtp-password" placeholder="••••••••" required>
+                        </div>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button type="button" class="test-btn" onclick="testForwardingConfig()">🧪 Test Configuration</button>
+                        <button type="submit" class="save-btn" onclick="saveForwardingConfig(event)">💾 Save Configuration</button>
+                    </div>
                 </form>
-            </div>
-            
-            <!-- Messages Card -->
-            <div class="card">
-                <h2>📬 Recent Messages</h2>
-                <div class="messages-list" id="messages-list">
-                    <p style="color: #999;">No messages yet...</p>
+                
+                <!-- Test Results -->
+                <div id="test-results" style="display: none; margin-top: 20px; padding: 15px; background: #f9f9f9; border-radius: 5px;">
+                    <h4 style="color: #333; margin-bottom: 10px;">Test Results:</h4>
+                    <div id="test-results-text" style="color: #666; font-family: monospace; white-space: pre-wrap; word-break: break-word;"></div>
                 </div>
             </div>
         </div>
     </div>
     
     <script>
+        // Page Navigation
+        function switchPage(pageName) {
+            // Hide all pages
+            document.querySelectorAll('.page').forEach(page => {
+                page.classList.remove('active');
+            });
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Show selected page
+            document.getElementById(pageName + '-page').classList.add('active');
+            event.target.classList.add('active');
+        }
+        
         // Update datetime
         function updateDateTime() {
             const now = new Date();
@@ -686,7 +981,6 @@
                 'Current Date and Time (UTC): ' + now.toLocaleString('en-US', options);
         }
         
-        // Update on load and every second
         updateDateTime();
         setInterval(updateDateTime, 1000);
         
@@ -698,7 +992,6 @@
                     document.getElementById('total-messages').textContent = data.total_messages;
                     document.getElementById('unread-messages').textContent = data.unread_messages;
                     
-                    // Update SIM card usage
                     if (data.sim_usage !== undefined) {
                         updateSimUsage(data.sim_usage.used, data.sim_usage.total);
                     }
@@ -729,8 +1022,6 @@
             const signalBars = document.getElementById('signal-bars');
             const signalInfo = document.getElementById('signal-info');
             
-            // RSSI: -113 to -51 dBm (lower is worse)
-            // Convert to bars: 0-5
             let bars = 0;
             if (rssi >= -51) bars = 5;
             else if (rssi >= -61) bars = 4;
@@ -739,18 +1030,15 @@
             else if (rssi >= -91) bars = 1;
             else bars = 0;
             
-            // Determine quality level
-            let qualityClass = 'danger'; // Default to danger for poor signal
+            let qualityClass = 'danger';
             if (bars >= 4) {
-                qualityClass = 'active'; // Green - good signal
+                qualityClass = 'active';
             } else if (bars >= 2) {
-                qualityClass = 'warning'; // Orange - medium signal
+                qualityClass = 'warning';
             }
             
-            // Display value
             signalValue.textContent = `${rssi} dBm (${bars}/5 bars)`;
             
-            // Update signal info box color
             signalInfo.classList.remove('warning', 'danger');
             if (qualityClass === 'warning') {
                 signalInfo.classList.add('warning');
@@ -758,7 +1046,6 @@
                 signalInfo.classList.add('danger');
             }
             
-            // Update bar indicators
             const barElements = signalBars.querySelectorAll('.signal-bar');
             barElements.forEach((bar, index) => {
                 bar.classList.remove('active', 'warning', 'danger');
@@ -815,9 +1102,7 @@
                 if (data.status === 'success') {
                     showAlert(`✅ SMS Service Center updated to ${scaNumber}`, 'success');
                     document.getElementById('sca-display').textContent = scaNumber;
-                    // Clear input
                     document.getElementById('sca-input').value = '';
-                    // Reload SCA to verify
                     setTimeout(loadSCA, 1000);
                 } else {
                     showAlert(`❌ Error: ${data.message}`, 'error');
@@ -839,7 +1124,6 @@
             progressFill.textContent = percentage + '%';
             usageText.textContent = used + '/' + total;
             
-            // Change color based on usage
             progressFill.classList.remove('warning', 'danger');
             if (percentage >= 90) {
                 progressFill.classList.add('danger');
@@ -932,6 +1216,16 @@
             }, 3000);
         }
         
+        // Show forwarding alert
+        function showForwardingAlert(message, type) {
+            const alert = document.getElementById('forwarding-alert');
+            alert.textContent = message;
+            alert.className = 'alert ' + type;
+            setTimeout(() => {
+                alert.className = 'alert';
+            }, 5000);
+        }
+        
         // Handle SMS form submission
         document.getElementById('sms-form').addEventListener('submit', function(e) {
             e.preventDefault();
@@ -970,11 +1264,166 @@
             });
         });
         
+        // Forwarding Functions
+        function toggleForwarding() {
+            const toggle = document.getElementById('forwarding-toggle').checked;
+            const status = document.getElementById('forwarding-status');
+            const form = document.getElementById('forwarding-form');
+            
+            if (toggle) {
+                status.textContent = 'Enabled';
+                status.classList.remove('disabled');
+                status.classList.add('enabled');
+                form.style.opacity = '1';
+                form.style.pointerEvents = 'auto';
+            } else {
+                status.textContent = 'Disabled';
+                status.classList.add('disabled');
+                status.classList.remove('enabled');
+                form.style.opacity = '0.5';
+                form.style.pointerEvents = 'none';
+            }
+        }
+        
+        function updateEncryption() {
+            const encryption = document.getElementById('encryption').value;
+            const protocolGroup = document.getElementById('protocol-group');
+            
+            if (encryption === 'TLS' || encryption === 'SSL') {
+                protocolGroup.style.display = 'block';
+            } else {
+                protocolGroup.style.display = 'none';
+            }
+        }
+        
+        function saveForwardingConfig(e) {
+            e.preventDefault();
+            
+            if (!document.getElementById('forwarding-toggle').checked) {
+                showForwardingAlert('❌ Please enable email forwarding first', 'error');
+                return;
+            }
+            
+            const config = {
+                enabled: document.getElementById('forwarding-toggle').checked,
+                sender_address: document.getElementById('sender-address').value,
+                sender_name: document.getElementById('sender-name').value,
+                subject: document.getElementById('subject').value,
+                destination_address: document.getElementById('destination-address').value,
+                smtp_server: document.getElementById('smtp-server').value,
+                smtp_port: parseInt(document.getElementById('smtp-port').value),
+                encryption: document.getElementById('encryption').value,
+                encryption_protocol: document.getElementById('encryption-protocol').value || null,
+                smtp_username: document.getElementById('smtp-username').value,
+                smtp_password: document.getElementById('smtp-password').value
+            };
+            
+            fetch('/api/forwarding/save', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(config)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    showForwardingAlert('✅ Configuration saved successfully!', 'success');
+                    loadForwardingConfig();
+                } else {
+                    showForwardingAlert(`❌ Error: ${data.message}`, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showForwardingAlert('❌ Error saving configuration', 'error');
+            });
+        }
+        
+        function loadForwardingConfig() {
+            fetch('/api/forwarding/config')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const config = data.config;
+                        document.getElementById('forwarding-toggle').checked = config.enabled;
+                        document.getElementById('sender-address').value = config.sender_address || '';
+                        document.getElementById('sender-name').value = config.sender_name || '';
+                        document.getElementById('subject').value = config.subject || '';
+                        document.getElementById('destination-address').value = config.destination_address || '';
+                        document.getElementById('smtp-server').value = config.smtp_server || '';
+                        document.getElementById('smtp-port').value = config.smtp_port || '587';
+                        document.getElementById('encryption').value = config.encryption || '';
+                        document.getElementById('encryption-protocol').value = config.encryption_protocol || '';
+                        document.getElementById('smtp-username').value = config.smtp_username || '';
+                        document.getElementById('smtp-password').value = config.smtp_password || '';
+                        
+                        toggleForwarding();
+                        updateEncryption();
+                    }
+                })
+                .catch(error => console.error('Error loading forwarding config:', error));
+        }
+        
+        function testForwardingConfig() {
+            const config = {
+                sender_address: document.getElementById('sender-address').value,
+                sender_name: document.getElementById('sender-name').value,
+                subject: document.getElementById('subject').value,
+                destination_address: document.getElementById('destination-address').value,
+                smtp_server: document.getElementById('smtp-server').value,
+                smtp_port: parseInt(document.getElementById('smtp-port').value),
+                encryption: document.getElementById('encryption').value,
+                encryption_protocol: document.getElementById('encryption-protocol').value || null,
+                smtp_username: document.getElementById('smtp-username').value,
+                smtp_password: document.getElementById('smtp-password').value
+            };
+            
+            const testBtn = event.target;
+            testBtn.disabled = true;
+            testBtn.textContent = '🔄 Testing...';
+            
+            fetch('/api/forwarding/test', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(config)
+            })
+            .then(response => response.json())
+            .then(data => {
+                const resultsDiv = document.getElementById('test-results');
+                const resultsText = document.getElementById('test-results-text');
+                resultsDiv.style.display = 'block';
+                
+                if (data.status === 'success') {
+                    resultsText.textContent = '✅ Test Email Sent Successfully!\n\n' + (data.message || 'Email forwarding is configured correctly.');
+                    resultsDiv.style.borderLeft = '4px solid #4caf50';
+                } else {
+                    resultsText.textContent = '❌ Test Failed\n\n' + (data.message || 'Check your SMTP configuration.');
+                    resultsDiv.style.borderLeft = '4px solid #f44336';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                const resultsDiv = document.getElementById('test-results');
+                const resultsText = document.getElementById('test-results-text');
+                resultsDiv.style.display = 'block';
+                resultsDiv.style.borderLeft = '4px solid #f44336';
+                resultsText.textContent = '❌ Connection Error\n\n' + error.message;
+            })
+            .finally(() => {
+                testBtn.disabled = false;
+                testBtn.textContent = '🧪 Test Configuration';
+            });
+        }
+        
         // Load initial data
         loadStats();
         loadMessages();
         loadSCA();
         loadSignalStrength();
+        loadForwardingConfig();
         
         // Refresh stats and messages every 5 seconds
         setInterval(() => {
