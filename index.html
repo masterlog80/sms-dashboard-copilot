@@ -984,18 +984,10 @@
                 
                 <!-- Gatewayapi Configuration Form -->
                 <div id="gatewayapi-form-wrapper" class="form-disabled">
-                    <div class="two-column">
-                        <div class="form-group">
-                            <label for="gatewayapi-username">API Username:</label>
-                            <input type="text" id="gatewayapi-username" placeholder="your-username" required>
-                            <small style="color: #666; margin-top: 5px; display: block;">Your Gatewayapi username</small>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="gatewayapi-token">API Token/Password:</label>
-                            <input type="password" id="gatewayapi-token" placeholder="Your API Token" required>
-                            <small style="color: #666; margin-top: 5px; display: block;">Your Gatewayapi API token or password</small>
-                        </div>
+                    <div class="form-group">
+                        <label for="gatewayapi-token">API Token:</label>
+                        <input type="password" id="gatewayapi-token" placeholder="Your API Token" required>
+                        <small style="color: #666; margin-top: 5px; display: block;">Your Gatewayapi API token</small>
                     </div>
                     
                     <div class="two-column">
@@ -1528,19 +1520,17 @@
                 return;
             }
             
-            const username = document.getElementById('gatewayapi-username').value.trim();
             const apiToken = document.getElementById('gatewayapi-token').value.trim();
             const senderId = document.getElementById('gatewayapi-sender-id').value.trim();
             const destPhone = document.getElementById('gatewayapi-phone').value.trim();
             
-            if (!username || !apiToken || !senderId || !destPhone) {
+            if (!apiToken || !senderId || !destPhone) {
                 showGatewayapiAlert('❌ Please fill in all required fields', 'error');
                 return;
             }
             
             const config = {
                 enabled: document.getElementById('gatewayapi-toggle').checked,
-                username: username,
                 api_token: apiToken,
                 sender_id: senderId,
                 destination_phone: destPhone
@@ -1578,7 +1568,6 @@
                         toggle.checked = config.enabled;
                         toggle.dispatchEvent(new Event('change'));
                         
-                        document.getElementById('gatewayapi-username').value = config.username || '';
                         document.getElementById('gatewayapi-token').value = config.api_token || '';
                         document.getElementById('gatewayapi-sender-id').value = config.sender_id || '';
                         document.getElementById('gatewayapi-phone').value = config.destination_phone || '';
@@ -1588,18 +1577,16 @@
         }
         
         function testGatewayapiConfig() {
-            const username = document.getElementById('gatewayapi-username').value.trim();
             const apiToken = document.getElementById('gatewayapi-token').value.trim();
             const senderId = document.getElementById('gatewayapi-sender-id').value.trim();
             const destPhone = document.getElementById('gatewayapi-phone').value.trim();
             
-            if (!username || !apiToken || !senderId || !destPhone) {
+            if (!apiToken || !senderId || !destPhone) {
                 showGatewayapiAlert('❌ Please fill in all required fields', 'error');
                 return;
             }
             
             const config = {
-                username: username,
                 api_token: apiToken,
                 sender_id: senderId,
                 destination_phone: destPhone
