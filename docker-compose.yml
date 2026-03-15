@@ -1,23 +1,36 @@
-version: '3.8'
-
 services:
-  sms-dashboard:
+  sms-dashboard-copilot:
+    #image: masterlog80/sms-dashboard-copilot:latest
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: sms-dashboard-copilot-sms-dashboard-1
-    ports:
-      - "5000:5000"
+    container_name: sms-dashboard-copilot
+    hostname: sms-dashboard-copilot
+    networks:
+      - proxy
+    environment:
+      - PYTHONUNBUFFERED=1
     devices:
       - /dev/ttyUSB0:/dev/ttyUSB0
     volumes:
+      #- /mnt/CEPHFS/volumes/sms-dashboard-copilot/data:/app/data
       - ./data:/app/data
-    environment:
-      - PYTHONUNBUFFERED=1
+    ports:
+      - 5000:5000
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints: [node.hostname  == DOCKER-JAPAN-01]
+      resources:
+        reservations:
+          cpus: '0.2'
+          memory: 256M
+        limits:
+          cpus: '2'
+          memory: 512M
     restart: unless-stopped
-    networks:
-      - sms-network
 
 networks:
-  sms-network:
-    driver: bridge
+  proxy:
+    external: true
