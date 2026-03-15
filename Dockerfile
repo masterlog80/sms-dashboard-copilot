@@ -17,9 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 COPY index.html .
 
-# NEW: copy favicon asset(s)
+# Copy favicon assets
 COPY favicon.svg .
-# Optional (only if you add it)
 COPY favicon.ico .
 
 # Create data directory
