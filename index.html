@@ -1022,8 +1022,30 @@
                     <div id="gatewayapi-test-results-text" style="color: #666; font-family: monospace; white-space: pre-wrap; word-break: break-word;"></div>
                 </div>
             </div>
+
+            <div class="card" style="margin-top: 30px;">
+                <h2>📝 SMS Logging</h2>
+                <div id="sms-logging-alert" class="alert"></div>
+
+                <!-- Enable/Disable Toggle -->
+                <div class="form-group">
+                    <label>SMS Logging Status:</label>
+                    <div class="toggle-switch">
+                        <label class="switch">
+                            <input type="checkbox" id="sms-logging-toggle" onchange="autoSaveSmsLogging()">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="status-badge disabled" id="sms-logging-status">Disabled</span>
+                    </div>
+                </div>
+
+                <p style="color: #666; font-size: 0.9em; margin-top: 10px;">
+                    When enabled, the content of each incoming SMS (sender number, timestamp and message text) is appended to <code>/app/data/sms_received.txt</code> on the server.
+                </p>
+            </div>
         </div>
     </div>
+
     
     <script>
         // Page Navigation
@@ -1641,6 +1663,74 @@
             });
         }
         
+        // ===== SMS LOGGING FUNCTIONS =====
+
+        function updateSmsLoggingUI() {
+            const toggle = document.getElementById('sms-logging-toggle');
+            const status = document.getElementById('sms-logging-status');
+
+            if (toggle.checked) {
+                status.textContent = 'Enabled';
+                status.classList.remove('disabled');
+                status.classList.add('enabled');
+            } else {
+                status.textContent = 'Disabled';
+                status.classList.add('disabled');
+                status.classList.remove('enabled');
+            }
+        }
+
+        function autoSaveSmsLogging() {
+            updateSmsLoggingUI();
+            saveSmsLoggingConfig();
+        }
+
+        function saveSmsLoggingConfig() {
+            const enabled = document.getElementById('sms-logging-toggle').checked;
+
+            fetch('/api/sms-logging/save', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ enabled: enabled })
+            })
+            .then(response => response.json())
+            .then(data => {
+                const alert = document.getElementById('sms-logging-alert');
+                if (data.status === 'success') {
+                    alert.textContent = '✅ SMS logging configuration saved!';
+                    alert.className = 'alert success';
+                } else {
+                    alert.textContent = `❌ Error: ${data.message}`;
+                    alert.className = 'alert error';
+                }
+                setTimeout(() => { alert.className = 'alert'; }, 5000);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                const alert = document.getElementById('sms-logging-alert');
+                alert.textContent = '❌ Error saving configuration';
+                alert.className = 'alert error';
+                setTimeout(() => { alert.className = 'alert'; }, 5000);
+            });
+        }
+
+        function loadSmsLoggingConfig() {
+            fetch('/api/sms-logging/config')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const toggle = document.getElementById('sms-logging-toggle');
+                        toggle.checked = !!data.config.enabled;
+                        updateSmsLoggingUI();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading SMS logging config:', error);
+                });
+        }
+
         // Load initial data
         loadStats();
         loadMessages();
@@ -1648,6 +1738,7 @@
         loadSignalStrength();
         loadForwardingConfig();
         loadGatewayapiConfig();
+        loadSmsLoggingConfig();
         
         // Refresh stats and messages every 5 seconds
         setInterval(() => {
