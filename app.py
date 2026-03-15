@@ -33,6 +33,8 @@ os.makedirs('/app/data', exist_ok=True)
 # Forwarding config files
 forwarding_config_file = '/app/data/forwarding_config.json'
 gatewayapi_config_file = '/app/data/gatewayapi_config.json'
+sms_logging_config_file = '/app/data/sms_logging_config.json'
+sms_log_txt_file = '/app/data/sms_received.txt'
 
 def log_message(message):
     """Log to both console and file"""
@@ -179,6 +181,45 @@ def save_gatewayapi_config(config):
     except Exception as e:
         log_message(f"[GATEWAYAPI ERROR] Failed to save config: {str(e)}")
         return False
+
+def load_sms_logging_config():
+    """Load SMS logging configuration"""
+    try:
+        if os.path.exists(sms_logging_config_file):
+            with open(sms_logging_config_file, 'r') as f:
+                config = json.load(f)
+                log_message(f"[SMS LOGGING] Loaded config: {config}")
+                return config
+    except Exception as e:
+        log_message(f"[SMS LOGGING ERROR] Failed to load config: {str(e)}")
+
+    return {'enabled': False}
+
+def save_sms_logging_config(config):
+    """Save SMS logging configuration"""
+    try:
+        log_message(f"[SMS LOGGING] Saving config: {config}")
+        with open(sms_logging_config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+        log_message("[SMS LOGGING] Configuration saved successfully")
+        return True
+    except Exception as e:
+        log_message(f"[SMS LOGGING ERROR] Failed to save config: {str(e)}")
+        return False
+
+def log_sms_to_file(phone, message):
+    """Append an incoming SMS to the local SMS log text file"""
+    try:
+        config = load_sms_logging_config()
+        if not config.get('enabled'):
+            return
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        entry = f"[{timestamp}] From: {phone}\n{message}\n{'-' * 40}\n"
+        with open(sms_log_txt_file, 'a', encoding='utf-8') as f:
+            f.write(entry)
+        log_message(f"[SMS LOGGING] ✓ SMS from {phone} logged to file")
+    except Exception as e:
+        log_message(f"[SMS LOGGING ERROR] Failed to log SMS: {str(e)}")
 
 def send_forwarding_email_async(phone, message):
     """Send email via SMTP with received SMS (async - non-blocking)"""
@@ -831,6 +872,7 @@ def read_sms_from_sim():
     for op in async_operations:
         send_forwarding_email_async(op['phone'], op['message'])
         send_gatewayapi_sms_async(op['phone'], op['message'])
+        log_sms_to_file(op['phone'], op['message'])
         delete_sms_from_modem_async(op['modem_ids'])
 
 def receive_sms_loop():
@@ -1444,6 +1486,46 @@ def test_gatewayapi_config():
         return jsonify({
             'status': 'error',
             'message': f'Test failed: {str(e)}'
+        }), 500
+
+@app.route('/api/sms-logging/config', methods=['GET'])
+def get_sms_logging_config():
+    """Get SMS logging configuration"""
+    try:
+        config = load_sms_logging_config()
+        return jsonify({
+            'status': 'success',
+            'config': config
+        }), 200
+    except Exception as e:
+        log_message(f"[API ERROR] Failed to get SMS logging config: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/sms-logging/save', methods=['POST'])
+def save_sms_logging_config_api():
+    """Save SMS logging configuration"""
+    try:
+        data = request.json
+        log_message(f"[API] Received SMS logging save request: {data}")
+
+        if save_sms_logging_config(data):
+            return jsonify({
+                'status': 'success',
+                'message': 'Configuration saved successfully'
+            }), 200
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to save configuration'
+            }), 500
+    except Exception as e:
+        log_message(f"[API ERROR] Failed to save SMS logging config: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
         }), 500
 
 if __name__ == '__main__':
