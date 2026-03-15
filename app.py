@@ -26,10 +26,6 @@ def favicon_svg():
 def favicon_ico():
     return send_from_directory(app.root_path, 'favicon.ico', mimetype='image/x-icon')
 
-@app.route('/favicon.png')
-def favicon_png():
-    return send_from_directory(app.root_path, 'favicon.png', mimetype='image/png')
-
 # Setup logging
 log_file = '/app/data/modem.log'
 os.makedirs('/app/data', exist_ok=True)
