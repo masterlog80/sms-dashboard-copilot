@@ -83,6 +83,50 @@ def try_decode_hex(text):
     
     return text
 
+def decode_phone_number(phone):
+    """Decode a phone number that may be encoded as concatenated decimal ASCII character codes.
+
+    Some GSM modems encode alphanumeric sender IDs (e.g. 'Vodafone') by converting each
+    character to its decimal ASCII value and concatenating the results without separators
+    (e.g. 'Vodafone' becomes '8611110097102111110101': V=86, o=111, d=100, a=97, ...).
+
+    Valid E.164 phone numbers are at most 15 digits, so only digit strings longer than 15
+    characters are candidates for this encoding.
+
+    The greedy 2-then-3 digit parsing is unambiguous for printable ASCII (32-126): every
+    3-digit value in range 100-126 has a 2-digit prefix ('10', '11', or '12') that is below
+    32 and thus never taken first, ensuring the correct character is always chosen.
+    """
+    if not phone or not phone.isdigit() or len(phone) <= 15:
+        return phone
+
+    result = []
+    i = 0
+    while i < len(phone):
+        decoded_char = None
+        for length in (2, 3):
+            if i + length > len(phone):
+                continue
+            try:
+                val = int(phone[i:i+length])
+            except ValueError:
+                continue
+            if 32 <= val <= 126:
+                decoded_char = (chr(val), length)
+                break
+
+        if decoded_char is None:
+            return phone
+
+        result.append(decoded_char[0])
+        i += decoded_char[1]
+
+    decoded_str = ''.join(result)
+    if any(c.isalpha() for c in decoded_str):
+        return decoded_str
+
+    return phone
+
 # In-memory message storage
 messages = {
     'sent': [],
@@ -781,7 +825,7 @@ def read_sms_from_sim():
                             if len(parts) >= 5:
                                 msg_id = parts[0].split(':')[1].strip()
                                 stat = parts[1].strip()
-                                phone = parts[2].strip().strip('"')
+                                phone = decode_phone_number(parts[2].strip().strip('"'))
                                 timestamp_part = parts[4].strip().strip('"')
                                 
                                 if msg_id in processed_messages:
