@@ -784,9 +784,6 @@ def read_sms_from_sim():
                                 phone = parts[2].strip().strip('"')
                                 timestamp_part = parts[4].strip().strip('"')
                                 
-                                # Decode phone number if it's hex
-                                phone = try_decode_hex(phone)
-                                
                                 if msg_id in processed_messages:
                                     log_message(f"[RECEIVER] Message {msg_id} already processed, skipping")
                                     i += 1
