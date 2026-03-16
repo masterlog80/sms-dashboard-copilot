@@ -44,7 +44,7 @@ def _safe_makedirs(path, *args, **kwargs):
     return _orig_makedirs(path, *args, **kwargs)
 _os.makedirs = _safe_makedirs
 
-from app import decode_hex_message, try_decode_hex
+from app import decode_hex_message, try_decode_hex, _build_multipart_pdus
 
 
 def _make_ucs2_part(text, seq, total, ref=0x42, use_16bit_ref=False):
@@ -218,6 +218,135 @@ class TestMultiPartReassembly(unittest.TestCase):
             s, _t, decoded = decode_hex_message(hex_str)
             parts.append({'id': str(modem_idx), 'seq': s, 'text': decoded})
         combined = self._combine(parts)
+        self.assertEqual(combined, text)
+
+
+class TestBuildMultipartPdus(unittest.TestCase):
+    """Tests for _build_multipart_pdus() – the PDU builder used when sending
+    long messages that would not fit inside a single SMS."""
+
+    VODAFONE_MSG = (
+        "Il tuo codice di verifica: 938707 "
+        "Il tuo codice di verifica scade il: "
+        "16 mar 2026, 05:19:41 "
+        "Non passare mai il codice di verifica a qualcun altro. "
+        "Gli operatori Vodafone non ti chiederanno mai questo codice."
+    )
+
+    # ------------------------------------------------------------------
+    # Basic structure tests
+    # ------------------------------------------------------------------
+    def test_long_ascii_message_produces_multiple_parts(self):
+        """A 207-char ASCII message must produce more than one part."""
+        self.assertGreater(len(self.VODAFONE_MSG), 160)
+        pdus = _build_multipart_pdus('+39123456789', self.VODAFONE_MSG, ref=0x42)
+        self.assertGreater(len(pdus), 1)
+
+    def test_returns_tuples_of_hex_and_length(self):
+        pdus = _build_multipart_pdus('+39123456789', self.VODAFONE_MSG, ref=1)
+        for pdu_hex, pdu_len in pdus:
+            self.assertIsInstance(pdu_hex, str)
+            self.assertIsInstance(pdu_len, int)
+            # pdu_hex must be valid hex
+            bytes.fromhex(pdu_hex)
+            # pdu_len must equal the byte-length of the PDU minus the SMSC byte
+            self.assertEqual(pdu_len, (len(pdu_hex) - 2) // 2)
+
+    def test_pdu_starts_with_smsc_00(self):
+        """PDU must start with '00' (use SIM default SMSC)."""
+        pdus = _build_multipart_pdus('+1555000111', self.VODAFONE_MSG, ref=5)
+        for pdu_hex, _ in pdus:
+            self.assertTrue(pdu_hex.startswith('00'),
+                            f"PDU does not start with SMSC 00: {pdu_hex[:10]}")
+
+    # ------------------------------------------------------------------
+    # UDH / sequence-number tests
+    # ------------------------------------------------------------------
+    def _ud_start(self, raw):
+        """Return the byte offset of the UD field inside a raw PDU bytearray.
+
+        Layout: SMSC(1) + FO(1) + MR(1) + AddrLen(1) + TonNpi(1) +
+                BcdAddr(ceil(addr_digits/2)) + PID(1) + DCS(1) + VP(1) + UDL(1)
+        """
+        addr_bcd_bytes = (raw[3] + 1) // 2
+        return (1 +              # SMSC '00'
+                1 +              # first octet
+                1 +              # MR
+                1 +              # address length
+                1 +              # TON/NPI
+                addr_bcd_bytes +
+                1 +              # PID
+                1 +              # DCS
+                1 +              # VP
+                1)               # UDL
+
+    def test_parts_have_correct_seq_and_total(self):
+        """Every part must carry the correct UDH sequence information."""
+        pdus = _build_multipart_pdus('+39123456789', self.VODAFONE_MSG, ref=0x42)
+        total_parts = len(pdus)
+        for expected_seq, (pdu_hex, _) in enumerate(pdus, start=1):
+            raw = bytes.fromhex(pdu_hex)
+            ud_start = self._ud_start(raw)
+            udh = raw[ud_start:ud_start + 6]
+            self.assertEqual(udh[0], 0x05, "UDHL should be 5")
+            self.assertEqual(udh[1], 0x00, "IEI should be 0x00")
+            self.assertEqual(udh[2], 0x03, "IEIL should be 3")
+            # udh[3] = ref – just check it is non-zero (we passed 0x42)
+            self.assertEqual(udh[3], 0x42, "ref should match")
+            self.assertEqual(udh[4], total_parts, "total_parts in UDH")
+            self.assertEqual(udh[5], expected_seq, "seq_num in UDH")
+
+    def test_reassembled_text_matches_original(self):
+        """Parts decoded with decode_hex_message and sorted by seq must
+        reproduce the original message exactly."""
+        pdus = _build_multipart_pdus('+39123456789', self.VODAFONE_MSG, ref=0x10)
+        parts = []
+        for idx, (pdu_hex, _) in enumerate(pdus, start=1):
+            raw = bytes.fromhex(pdu_hex)
+            ud_start = self._ud_start(raw)
+            udl = raw[ud_start - 1]
+            ud_hex = raw[ud_start:ud_start + udl].hex().upper()
+            seq, total, decoded = decode_hex_message(ud_hex)
+            self.assertGreater(seq, 0, f"Part {idx} has no seq number")
+            parts.append({'id': str(idx), 'seq': seq, 'text': decoded})
+
+        ordered = sorted(parts, key=lambda p: p['seq'])
+        combined = ''.join(p['text'] for p in ordered)
+        self.assertEqual(combined, self.VODAFONE_MSG)
+
+    # ------------------------------------------------------------------
+    # Reference number tests
+    # ------------------------------------------------------------------
+    def test_ref_is_embedded_in_all_parts(self):
+        """The supplied ref byte must appear in the UDH of every part."""
+        ref = 0xAB
+        pdus = _build_multipart_pdus('+1555000111', self.VODAFONE_MSG, ref=ref)
+        for pdu_hex, _ in pdus:
+            raw = bytes.fromhex(pdu_hex)
+            ud_start = self._ud_start(raw)
+            udh = raw[ud_start:ud_start + 6]
+            self.assertEqual(udh[3], ref & 0xFF)
+
+    # ------------------------------------------------------------------
+    # Two-part message: verify correct ordering even if delivered reversed
+    # ------------------------------------------------------------------
+    def test_two_part_message_ordering(self):
+        text = 'A' * 200  # 200 chars > 160, fits in 3 UCS-2 parts (67+67+66)
+        pdus = _build_multipart_pdus('+49170123456', text, ref=7)
+        # Simulate reversed delivery
+        parts = []
+        for idx, (pdu_hex, _) in enumerate(pdus, start=1):
+            raw = bytes.fromhex(pdu_hex)
+            ud_start = self._ud_start(raw)
+            udl = raw[ud_start - 1]
+            ud_hex = raw[ud_start:ud_start + udl].hex().upper()
+            seq, _, decoded = decode_hex_message(ud_hex)
+            parts.append({'id': str(idx), 'seq': seq, 'text': decoded})
+
+        # Reverse to simulate wrong arrival order
+        parts_reversed = list(reversed(parts))
+        ordered = sorted(parts_reversed, key=lambda p: p['seq'])
+        combined = ''.join(p['text'] for p in ordered)
         self.assertEqual(combined, text)
 
 
