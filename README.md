@@ -9,7 +9,7 @@ cd sms-dashboard-copilot
 ```
 2. Build the docker image:
 ```
-y | docker image prune
+y | docker image prune --all
 docker build -t sms-dashboard-copilot .
 ```
 3. Deploy the composer file:
