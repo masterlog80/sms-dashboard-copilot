@@ -50,38 +50,74 @@ def log_message(message):
 
 def try_decode_hex(text):
     """Try to decode hex-encoded text"""
+    _seq, _total, decoded = decode_hex_message(text)
+    return decoded
+
+
+def decode_hex_message(text):
+    """Decode a potentially hex-encoded SMS message, stripping UDH if present.
+
+    Multi-part (concatenated) SMS messages carry a User Data Header (UDH) at
+    the beginning of the raw hex payload.  Two formats are supported:
+
+    * 8-bit reference  – UDHL=0x05, IEI=0x00, IEIL=0x03, ref(1), total(1), seq(1)
+    * 16-bit reference – UDHL=0x06, IEI=0x08, IEIL=0x04, ref(2), total(1), seq(1)
+
+    Returns a tuple (seq_num, total_parts, decoded_text) where:
+      seq_num     – 1-based part index from UDH (0 when no UDH is present)
+      total_parts – total number of parts from UDH (0 when no UDH is present)
+      decoded_text – decoded message text with UDH bytes stripped
+    """
     try:
         if not all(c in '0123456789ABCDEFabcdef' for c in text.strip()):
-            return text
-        
+            return 0, 0, text
+
         hex_str = text.strip()
-        
+        raw = bytes.fromhex(hex_str)
+
+        seq_num = 0
+        total_parts = 0
+        text_offset = 0
+
+        # Detect UDH for 8-bit reference concatenation (IEI 0x00)
+        if len(raw) >= 6 and raw[0] == 0x05 and raw[1] == 0x00 and raw[2] == 0x03:
+            total_parts = raw[4]
+            seq_num = raw[5]
+            text_offset = 6
+
+        # Detect UDH for 16-bit reference concatenation (IEI 0x08)
+        elif len(raw) >= 7 and raw[0] == 0x06 and raw[1] == 0x08 and raw[2] == 0x04:
+            total_parts = raw[5]
+            seq_num = raw[6]
+            text_offset = 7
+
+        text_bytes = raw[text_offset:]
+
         try:
-            decoded = bytes.fromhex(hex_str).decode('utf-16-be', errors='ignore')
+            decoded = text_bytes.decode('utf-16-be', errors='ignore')
             if decoded and len(decoded) > 0:
-                return decoded
-        except:
+                return seq_num, total_parts, decoded
+        except Exception:
             pass
-        
+
         try:
-            decoded = bytes.fromhex(hex_str).decode('utf-8', errors='ignore')
+            decoded = text_bytes.decode('utf-8', errors='ignore')
             if decoded and len(decoded) > 0:
-                return decoded
-        except:
+                return seq_num, total_parts, decoded
+        except Exception:
             pass
-        
+
         try:
-            decoded = bytes.fromhex(hex_str).decode('latin-1', errors='ignore')
+            decoded = text_bytes.decode('latin-1', errors='ignore')
             if decoded and len(decoded) > 0:
-                return decoded
-        except:
+                return seq_num, total_parts, decoded
+        except Exception:
             pass
-        
+
     except Exception as e:
         log_message(f"[DECODE ERROR] {str(e)}")
-        pass
-    
-    return text
+
+    return 0, 0, text
 
 def decode_phone_number(phone):
     """Decode a phone number that may be encoded as concatenated decimal ASCII character codes.
@@ -837,7 +873,7 @@ def read_sms_from_sim():
                                     message_text = lines[i + 1].strip()
                                     
                                     if message_text:
-                                        decoded_text = try_decode_hex(message_text)
+                                        seq_num, _total, decoded_text = decode_hex_message(message_text)
                                         
                                         if decoded_text:
                                             msg_key = (phone, timestamp_part)
@@ -851,6 +887,7 @@ def read_sms_from_sim():
                                             
                                             pending_parts[msg_key]['parts'].append({
                                                 'id': msg_id,
+                                                'seq': seq_num,
                                                 'text': decoded_text,
                                             })
                                             pending_parts[msg_key]['modem_ids'].append(msg_id)
@@ -874,7 +911,15 @@ def read_sms_from_sim():
                 phone, timestamp_part = msg_key
                 
                 if (current_time - first_seen > 6) or (len(response_str) < 100):
-                    combined_text = ''.join([p['text'] for p in parts_list])
+                    # Sort parts by UDH sequence number when available; fall back
+                    # to integer storage-index order so that parts which arrived
+                    # (and were stored) out of sequence are reassembled correctly.
+                    has_seq = any(p['seq'] > 0 for p in parts_list)
+                    if has_seq:
+                        parts_ordered = sorted(parts_list, key=lambda p: p['seq'])
+                    else:
+                        parts_ordered = sorted(parts_list, key=lambda p: int(p['id']))
+                    combined_text = ''.join([p['text'] for p in parts_ordered])
                     
                     already_stored = any(
                         m['phone'] == phone and m['message'] == combined_text 
