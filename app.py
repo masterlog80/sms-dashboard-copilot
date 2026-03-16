@@ -48,6 +48,45 @@ def log_message(message):
     except:
         pass
 
+def parse_udh_from_hex(hex_str):
+    """Parse the User Data Header (UDH) from a hex-encoded SMS message body.
+
+    Multipart (concatenated) SMS messages include a UDH at the start of the
+    message body that carries the reference number shared by all parts, the
+    total number of parts, and the sequence number of this individual part.
+    Stripping the UDH before decoding avoids garbled characters at the
+    beginning of each decoded part.
+
+    Two IE IDs are handled:
+      * 0x00 – 8-bit reference: header is  05 00 03 <ref8>  <total> <part>
+      * 0x08 – 16-bit reference: header is 06 08 04 <refHI> <refLO> <total> <part>
+
+    Returns:
+        (ref_num, total_parts, part_num, clean_hex)
+        where clean_hex has the UDH bytes removed.
+        If no valid UDH is found all four values are None / the original hex_str.
+    """
+    try:
+        h = hex_str.strip().upper()
+        # 8-bit reference number: UDH = 05 00 03 XX YY ZZ  (6 bytes = 12 hex chars)
+        if len(h) >= 12 and h[:6] == '050003':
+            ref_num = int(h[6:8], 16)
+            total_parts = int(h[8:10], 16)
+            part_num = int(h[10:12], 16)
+            if total_parts >= 1 and 1 <= part_num <= total_parts:
+                return ref_num, total_parts, part_num, h[12:]
+        # 16-bit reference number: UDH = 06 08 04 XX XX YY ZZ  (7 bytes = 14 hex chars)
+        if len(h) >= 14 and h[:6] == '060804':
+            ref_num = int(h[6:10], 16)
+            total_parts = int(h[10:12], 16)
+            part_num = int(h[12:14], 16)
+            if total_parts >= 1 and 1 <= part_num <= total_parts:
+                return ref_num, total_parts, part_num, h[14:]
+    except Exception:
+        pass
+    return None, None, None, hex_str
+
+
 def try_decode_hex(text):
     """Try to decode hex-encoded text"""
     try:
@@ -837,10 +876,17 @@ def read_sms_from_sim():
                                     message_text = lines[i + 1].strip()
                                     
                                     if message_text:
-                                        decoded_text = try_decode_hex(message_text)
+                                        # Extract UDH (part sequence info) before decoding
+                                        ref_num, total_parts, part_num, clean_hex = parse_udh_from_hex(message_text)
+                                        decoded_text = try_decode_hex(clean_hex)
                                         
                                         if decoded_text:
-                                            msg_key = (phone, timestamp_part)
+                                            # Group by UDH reference number when available
+                                            # (more reliable than timestamp for multipart SMS)
+                                            if ref_num is not None:
+                                                msg_key = (phone, f'udh_{ref_num}')
+                                            else:
+                                                msg_key = (phone, timestamp_part)
                                             
                                             if msg_key not in pending_parts:
                                                 pending_parts[msg_key] = {
@@ -852,11 +898,12 @@ def read_sms_from_sim():
                                             pending_parts[msg_key]['parts'].append({
                                                 'id': msg_id,
                                                 'text': decoded_text,
+                                                'part_num': part_num if part_num is not None else len(pending_parts[msg_key]['parts']) + 1,
                                             })
                                             pending_parts[msg_key]['modem_ids'].append(msg_id)
                                             
                                             processed_messages.add(msg_id)
-                                            log_message(f"[RECEIVER] Part {len(pending_parts[msg_key]['parts'])} from {phone}: {decoded_text[:30]}...")
+                                            log_message(f"[RECEIVER] Part {len(pending_parts[msg_key]['parts'])} (seq={part_num}) from {phone}: {decoded_text[:30]}...")
                         except Exception as e:
                             log_message(f"[RECEIVER] Error parsing line '{line}': {str(e)}")
                     
@@ -874,7 +921,10 @@ def read_sms_from_sim():
                 phone, timestamp_part = msg_key
                 
                 if (current_time - first_seen > 6) or (len(response_str) < 100):
-                    combined_text = ''.join([p['text'] for p in parts_list])
+                    # Sort parts by their sequence number before combining to ensure
+                    # correct order regardless of the order they arrived at the modem
+                    sorted_parts = sorted(parts_list, key=lambda p: p.get('part_num', float('inf')))
+                    combined_text = ''.join([p['text'] for p in sorted_parts])
                     
                     already_stored = any(
                         m['phone'] == phone and m['message'] == combined_text 
