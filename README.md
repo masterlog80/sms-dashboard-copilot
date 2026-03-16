@@ -1,5 +1,4 @@
 # sms-dashboard-copilot
-Ref. https://github.com/copilot/c/5910a1da-cf1b-413f-a13b-6b38a1e75aa2
 
 Instructions:
 1. Copy all the file on the same folder
