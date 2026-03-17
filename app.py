@@ -33,6 +33,7 @@ os.makedirs('/app/data', exist_ok=True)
 # Forwarding config files
 forwarding_config_file = '/app/data/forwarding_config.json'
 gatewayapi_config_file = '/app/data/gatewayapi_config.json'
+telegram_config_file = '/app/data/telegram_config.json'
 sms_logging_config_file = '/app/data/sms_logging_config.json'
 sms_log_txt_file = '/app/data/sms_received.txt'
 
@@ -226,6 +227,35 @@ def save_gatewayapi_config(config):
         log_message(f"[GATEWAYAPI ERROR] Failed to save config: {str(e)}")
         return False
 
+def load_telegram_config():
+    """Load Telegram configuration"""
+    try:
+        if os.path.exists(telegram_config_file):
+            with open(telegram_config_file, 'r') as f:
+                config = json.load(f)
+                log_message(f"[TELEGRAM] Loaded config: {config}")
+                return config
+    except Exception as e:
+        log_message(f"[TELEGRAM ERROR] Failed to load config: {str(e)}")
+
+    return {
+        'enabled': False,
+        'bot_token': '',
+        'chat_id': ''
+    }
+
+def save_telegram_config(config):
+    """Save Telegram configuration"""
+    try:
+        log_message(f"[TELEGRAM] Saving config: {config}")
+        with open(telegram_config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+        log_message("[TELEGRAM] Configuration saved successfully")
+        return True
+    except Exception as e:
+        log_message(f"[TELEGRAM ERROR] Failed to save config: {str(e)}")
+        return False
+
 def load_sms_logging_config():
     """Load SMS logging configuration"""
     try:
@@ -408,6 +438,54 @@ def send_gatewayapi_sms_async(phone, message):
     sms_thread = threading.Thread(target=send_sms, daemon=True)
     sms_thread.start()
     log_message("[GATEWAYAPI] SMS send thread started")
+
+def send_telegram_message_async(phone, message):
+    """Send message via Telegram Bot API (async - non-blocking)"""
+    def send_message():
+        try:
+            config = load_telegram_config()
+
+            if not config['enabled']:
+                log_message("[TELEGRAM] Telegram forwarding is disabled, skipping")
+                return False
+
+            log_message(f"[TELEGRAM] Starting async Telegram send for message from {phone}")
+
+            bot_token = config['bot_token']
+            chat_id = config['chat_id']
+
+            telegram_message = f"📱 SMS from {phone}:\n{message}"
+
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+
+            payload = {
+                'chat_id': chat_id,
+                'text': telegram_message
+            }
+
+            log_message(f"[TELEGRAM] Sending message to chat_id {chat_id}")
+
+            response = requests.post(url, json=payload, timeout=10)
+
+            log_message(f"[TELEGRAM] Response status: {response.status_code}")
+            log_message(f"[TELEGRAM] Response: {response.text}")
+
+            if response.status_code == 200:
+                log_message(f"[TELEGRAM] ✓ Message sent successfully to chat_id {chat_id}")
+                return True
+            else:
+                log_message(f"[TELEGRAM] ✗ Failed to send message: {response.text}")
+                return False
+
+        except Exception as e:
+            log_message(f"[TELEGRAM ERROR] Failed to send message: {str(e)}")
+            import traceback
+            log_message(f"[TELEGRAM ERROR] Traceback: {traceback.format_exc()}")
+            return False
+
+    telegram_thread = threading.Thread(target=send_message, daemon=True)
+    telegram_thread.start()
+    log_message("[TELEGRAM] Message send thread started")
 
 def delete_sms_from_modem_async(modem_ids):
     """Delete SMS from modem asynchronously (non-blocking)"""
@@ -948,6 +1026,7 @@ def read_sms_from_sim():
     for op in async_operations:
         send_forwarding_email_async(op['phone'], op['message'])
         send_gatewayapi_sms_async(op['phone'], op['message'])
+        send_telegram_message_async(op['phone'], op['message'])
         log_sms_to_file(op['phone'], op['message'])
         delete_sms_from_modem_async(op['modem_ids'])
 
@@ -1559,6 +1638,96 @@ def test_gatewayapi_config():
         }), 500
     except Exception as e:
         log_message(f"[GATEWAYAPI ERROR] Test failed: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Test failed: {str(e)}'
+        }), 500
+
+@app.route('/api/telegram/config', methods=['GET'])
+def get_telegram_config():
+    """Get Telegram configuration"""
+    try:
+        config = load_telegram_config()
+        return jsonify({
+            'status': 'success',
+            'config': config
+        }), 200
+    except Exception as e:
+        log_message(f"[API ERROR] Failed to get Telegram config: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/telegram/save', methods=['POST'])
+def save_telegram_config_api():
+    """Save Telegram configuration"""
+    try:
+        data = request.json
+        log_message(f"[API] Received telegram save request: {data}")
+
+        if save_telegram_config(data):
+            return jsonify({
+                'status': 'success',
+                'message': 'Configuration saved successfully'
+            }), 200
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to save configuration'
+            }), 500
+    except Exception as e:
+        log_message(f"[API ERROR] Failed to save Telegram config: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/telegram/test', methods=['POST'])
+def test_telegram_config():
+    """Test Telegram configuration"""
+    try:
+        data = request.json
+
+        bot_token = data.get('bot_token')
+        chat_id = data.get('chat_id')
+
+        log_message("[TELEGRAM] Testing Telegram configuration...")
+
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+
+        payload = {
+            'chat_id': chat_id,
+            'text': 'This is a test message from SMS Dashboard Copilot. If you received this, your Telegram Bot configuration is working correctly!'
+        }
+
+        response = requests.post(url, json=payload, timeout=10)
+
+        log_message(f"[TELEGRAM] Test response status: {response.status_code}")
+        log_message(f"[TELEGRAM] Test response: {response.text}")
+
+        if response.status_code == 200:
+            log_message(f"[TELEGRAM] ✓ Test message sent successfully")
+            return jsonify({
+                'status': 'success',
+                'message': f'Test message sent successfully to chat_id {chat_id}'
+            }), 200
+        else:
+            error_info = response.json().get('description', response.text)
+            log_message(f"[TELEGRAM] ✗ Failed to send test message: {error_info}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to send message: {error_info}'
+            }), 500
+
+    except requests.exceptions.RequestException as e:
+        log_message(f"[TELEGRAM ERROR] Request failed: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Connection error: {str(e)}'
+        }), 500
+    except Exception as e:
+        log_message(f"[TELEGRAM ERROR] Test failed: {str(e)}")
         return jsonify({
             'status': 'error',
             'message': f'Test failed: {str(e)}'
