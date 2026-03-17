@@ -9,7 +9,6 @@ from datetime import datetime
 import sys
 import threading
 import re
-import random
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -119,74 +118,6 @@ def decode_hex_message(text):
         log_message(f"[DECODE ERROR] {str(e)}")
 
     return 0, 0, text
-
-
-def _build_multipart_pdus(phone, text, ref):
-    """Build PDU hex strings for a multi-part UCS-2 SMS.
-
-    Encodes *text* as UCS-2 and wraps each part in a 6-byte UDH
-    (IEI 0x00, 8-bit reference) so the receiving device can reassemble
-    the parts in the correct order even if they arrive out of sequence.
-
-    Args:
-        phone: destination number (with or without leading '+')
-        text:  full message text (any characters)
-        ref:   1-byte concatenation reference (0-255), unique per message
-
-    Returns:
-        List of (pdu_hex, pdu_octets) tuples, one per part.
-        pdu_hex    – full PDU as an uppercase hex string, starting with the
-                     SMSC field '00' (use SIM default).
-        pdu_octets – byte length of the PDU *excluding* the leading SMSC
-                     byte, as required by AT+CMGS=<n> in PDU mode.
-    """
-    MAX_CHARS_PER_PART = 67  # 67 chars x 2 bytes/char + 6-byte UDH = 140 bytes (max UD)
-
-    chunks = [text[i:i + MAX_CHARS_PER_PART]
-              for i in range(0, len(text), MAX_CHARS_PER_PART)]
-    total = len(chunks)
-
-    # Encode destination address into BCD (nibble-swapped) format
-    digits = phone.lstrip('+')
-    ton_npi = 0x91 if phone.startswith('+') else 0x81
-    num_digits = len(digits)
-    padded = digits if len(digits) % 2 == 0 else digits + 'F'
-    swapped = ''.join(padded[i + 1] + padded[i]
-                      for i in range(0, len(padded), 2))
-
-    pdus = []
-    for seq, chunk in enumerate(chunks, start=1):
-        # UDH: UDHL=5, IEI=0x00, IEIL=3, ref, total_parts, seq_num
-        udh = bytes([0x05, 0x00, 0x03, ref & 0xFF, total, seq])
-        text_bytes = chunk.encode('utf-16-be')
-        ud = udh + text_bytes
-        udl = len(ud)  # UCS-2: UDL is counted in bytes
-
-        # SMS-SUBMIT first octet:
-        #   TP-MTI  = 01  (SMS-SUBMIT)
-        #   TP-VPF  = 10  (relative validity period present)
-        #   TP-UDHI = 1   (UDH indicator – UDH is present)
-        first_octet = 0x01 | 0x10 | 0x40  # 0x51
-
-        pdu_body = (
-            f'{first_octet:02X}'   # First octet
-            '00'                   # MR – modem assigns the reference
-            f'{num_digits:02X}'    # Address-Length (number of digits)
-            f'{ton_npi:02X}'       # TON/NPI
-            f'{swapped}'           # BCD-encoded address
-            '00'                   # PID
-            '08'                   # DCS: UCS-2 encoding
-            'AA'                   # VP: relative, ~12 hours
-            f'{udl:02X}'           # UDL (bytes for UCS-2)
-            f'{ud.hex().upper()}'  # UD = UDH + text
-        )
-        full_pdu = '00' + pdu_body       # '00' = use modem's default SMSC
-        pdu_octets = len(pdu_body) // 2  # AT+CMGS=<n> excludes SMSC byte
-
-        pdus.append((full_pdu, pdu_octets))
-
-    return pdus
-
 
 def decode_phone_number(phone):
     """Decode a phone number that may be encoded as concatenated decimal ASCII character codes.
@@ -1076,65 +1007,7 @@ def send_sms(phone, message_text):
             modem.flushInput()
             modem.flushOutput()
             time.sleep(0.5)
-
-            # Determine whether the message fits in a single SMS.
-            # ASCII text uses GSM 7-bit (up to 160 chars); anything else
-            # needs UCS-2 (up to 70 chars per single SMS).
-            max_single_sms = 160 if message_text.isascii() else 70
-
-            if len(message_text) > max_single_sms:
-                # Long message: send as multi-part PDU with UDH so the
-                # receiving device can reassemble parts in the correct order.
-                log_message(f"[SMS] Long message ({len(message_text)} chars), "
-                            "sending as multi-part PDU...")
-                ref = random.randint(1, 255)
-                pdus = _build_multipart_pdus(phone, message_text, ref)
-                log_message(f"[SMS] Split into {len(pdus)} parts (ref={ref})")
-
-                # Switch modem to PDU mode for sending
-                modem.write(b'AT+CMGF=0\r\n')
-                time.sleep(0.5)
-                modem.read(100)
-
-                all_ok = True
-                for idx, (pdu_hex, pdu_len) in enumerate(pdus, start=1):
-                    log_message(f"[SMS] Sending part {idx}/{len(pdus)} "
-                                f"({pdu_len} bytes)...")
-                    cmd = f'AT+CMGS={pdu_len}\r\n'
-                    modem.write(cmd.encode())
-                    time.sleep(1.5)
-                    response = modem.read(100)
-                    last_successful_command_time = time.time()
-
-                    if b'>' not in response:
-                        log_message(f"[SMS] ✗ Modem not ready for part {idx}")
-                        all_ok = False
-                        break
-
-                    modem.write(pdu_hex.encode())
-                    time.sleep(0.5)
-                    modem.write(b'\x1A')
-                    time.sleep(3)
-                    response = modem.read(500)
-                    last_successful_command_time = time.time()
-                    log_message(f"[SMS] Part {idx} response: {response}")
-
-                    if b'+CMGS:' not in response and b'OK' not in response:
-                        log_message(f"[SMS] ✗ Part {idx} failed")
-                        all_ok = False
-                        break
-
-                # Restore text mode regardless of outcome
-                modem.write(b'AT+CMGF=1\r\n')
-                time.sleep(0.5)
-                modem.read(100)
-
-                if all_ok:
-                    log_message(f"[SMS] ✓ All {len(pdus)} parts sent successfully")
-                    return True, "SMS sent successfully"
-                else:
-                    return False, "Multi-part SMS sending failed"
-
+            
             log_message(f"[SMS] Sending CMGS command...")
             cmd = f'AT+CMGS="{phone}"\r\n'
             modem.write(cmd.encode())
