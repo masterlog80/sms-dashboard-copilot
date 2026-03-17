@@ -10,6 +10,9 @@ services:
       - proxy
     environment:
       - PYTHONUNBUFFERED=1
+      # Set to "true" to combine multipart (concatenated) SMS segments into a single message.
+      # Disabled by default; each SMS segment is stored as an individual message.
+      #- COMBINE_MULTIPART_SMS=true
     devices:
       - /dev/ttyUSB0:/dev/ttyUSB0
     volumes:

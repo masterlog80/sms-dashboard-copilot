@@ -452,6 +452,10 @@ def delete_sms_from_modem_async(modem_ids):
 # Track SMS parts for concatenation
 pending_parts = {}
 
+# Feature flag: combine multiple SMS parts (multipart/concatenated SMS) into one message.
+# Disabled by default. Set the environment variable COMBINE_MULTIPART_SMS=true to enable.
+COMBINE_MULTIPART_SMS = os.environ.get('COMBINE_MULTIPART_SMS', 'false').lower() == 'true'
+
 # Modem lock to prevent simultaneous access
 modem_lock = threading.Lock()
 
@@ -840,23 +844,53 @@ def read_sms_from_sim():
                                         decoded_text = try_decode_hex(message_text)
                                         
                                         if decoded_text:
-                                            msg_key = (phone, timestamp_part)
-                                            
-                                            if msg_key not in pending_parts:
-                                                pending_parts[msg_key] = {
-                                                    'parts': [],
-                                                    'modem_ids': [],
-                                                    'first_seen': time.time()
-                                                }
-                                            
-                                            pending_parts[msg_key]['parts'].append({
-                                                'id': msg_id,
-                                                'text': decoded_text,
-                                            })
-                                            pending_parts[msg_key]['modem_ids'].append(msg_id)
-                                            
                                             processed_messages.add(msg_id)
-                                            log_message(f"[RECEIVER] Part {len(pending_parts[msg_key]['parts'])} from {phone}: {decoded_text[:30]}...")
+
+                                            if not COMBINE_MULTIPART_SMS:
+                                                # Combining disabled: store each part as an individual message immediately
+                                                already_stored = any(
+                                                    m['phone'] == phone and m['message'] == decoded_text
+                                                    for m in messages['received']
+                                                )
+
+                                                if not already_stored:
+                                                    message = {
+                                                        'type': 'received',
+                                                        'phone': phone,
+                                                        'message': decoded_text,
+                                                        'timestamp': datetime.now().isoformat(),
+                                                        'status': 'received'
+                                                    }
+
+                                                    messages['received'].append(message)
+                                                    save_messages_to_file()
+
+                                                    log_message(f"[RECEIVER] ✓ SMS from {phone}: {decoded_text[:50]}")
+                                                    log_message(f"[RECEIVER] Message stored locally, will be deleted from SIM card asynchronously")
+
+                                                    async_operations.append({
+                                                        'phone': phone,
+                                                        'message': decoded_text,
+                                                        'modem_ids': [msg_id]
+                                                    })
+                                            else:
+                                                # Combining enabled: accumulate parts and merge later
+                                                msg_key = (phone, timestamp_part)
+
+                                                if msg_key not in pending_parts:
+                                                    pending_parts[msg_key] = {
+                                                        'parts': [],
+                                                        'modem_ids': [],
+                                                        'first_seen': time.time()
+                                                    }
+
+                                                pending_parts[msg_key]['parts'].append({
+                                                    'id': msg_id,
+                                                    'text': decoded_text,
+                                                })
+                                                pending_parts[msg_key]['modem_ids'].append(msg_id)
+
+                                                log_message(f"[RECEIVER] Part {len(pending_parts[msg_key]['parts'])} from {phone}: {decoded_text[:30]}...")
                         except Exception as e:
                             log_message(f"[RECEIVER] Error parsing line '{line}': {str(e)}")
                     
@@ -866,45 +900,46 @@ def read_sms_from_sim():
             
             current_time = time.time()
             
-            # Find completed messages
-            for msg_key, msg_data in list(pending_parts.items()):
-                parts_list = msg_data['parts']
-                modem_ids = msg_data['modem_ids']
-                first_seen = msg_data['first_seen']
-                phone, timestamp_part = msg_key
-                
-                if (current_time - first_seen > 6) or (len(response_str) < 100):
-                    combined_text = ''.join([p['text'] for p in parts_list])
-                    
-                    already_stored = any(
-                        m['phone'] == phone and m['message'] == combined_text 
-                        for m in messages['received']
-                    )
-                    
-                    if not already_stored and combined_text:
-                        message = {
-                            'type': 'received',
-                            'phone': phone,
-                            'message': combined_text,
-                            'timestamp': datetime.now().isoformat(),
-                            'status': 'received'
-                        }
-                        
-                        messages['received'].append(message)
-                        save_messages_to_file()
-                        
-                        log_message(f"[RECEIVER] ✓ COMBINED SMS from {phone} ({len(parts_list)} parts): {combined_text[:50]}")
-                        log_message(f"[RECEIVER] Message stored locally, will be deleted from SIM card asynchronously")
-                        
-                        # Store async operation details
-                        async_operations.append({
-                            'phone': phone,
-                            'message': combined_text,
-                            'modem_ids': modem_ids
-                        })
-                        
-                        # Mark for deletion from pending_parts
-                        del pending_parts[msg_key]
+            # Find completed combined messages (only used when COMBINE_MULTIPART_SMS is enabled)
+            if COMBINE_MULTIPART_SMS:
+                for msg_key, msg_data in list(pending_parts.items()):
+                    parts_list = msg_data['parts']
+                    modem_ids = msg_data['modem_ids']
+                    first_seen = msg_data['first_seen']
+                    phone, timestamp_part = msg_key
+
+                    if (current_time - first_seen > 6) or (len(response_str) < 100):
+                        combined_text = ''.join([p['text'] for p in parts_list])
+
+                        already_stored = any(
+                            m['phone'] == phone and m['message'] == combined_text
+                            for m in messages['received']
+                        )
+
+                        if not already_stored and combined_text:
+                            message = {
+                                'type': 'received',
+                                'phone': phone,
+                                'message': combined_text,
+                                'timestamp': datetime.now().isoformat(),
+                                'status': 'received'
+                            }
+
+                            messages['received'].append(message)
+                            save_messages_to_file()
+
+                            log_message(f"[RECEIVER] ✓ COMBINED SMS from {phone} ({len(parts_list)} parts): {combined_text[:50]}")
+                            log_message(f"[RECEIVER] Message stored locally, will be deleted from SIM card asynchronously")
+
+                            # Store async operation details
+                            async_operations.append({
+                                'phone': phone,
+                                'message': combined_text,
+                                'modem_ids': modem_ids
+                            })
+
+                            # Mark for deletion from pending_parts
+                            del pending_parts[msg_key]
                         
         except Exception as e:
             log_message(f"[RECEIVER ERROR] {str(e)}")
