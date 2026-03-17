@@ -1024,6 +1024,51 @@
             </div>
 
             <div class="card" style="margin-top: 30px;">
+                <h2>💬 Telegram Forwarding Configuration</h2>
+                <div id="telegram-alert" class="alert"></div>
+
+                <!-- Enable/Disable Toggle -->
+                <div class="form-group">
+                    <label>Telegram Forwarding Status:</label>
+                    <div class="toggle-switch">
+                        <label class="switch">
+                            <input type="checkbox" id="telegram-toggle" onchange="autoSaveTelegram()">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="status-badge disabled" id="telegram-status">Disabled</span>
+                    </div>
+                </div>
+
+                <div class="section-divider"></div>
+
+                <!-- Telegram Configuration Form -->
+                <div id="telegram-form-wrapper" class="form-disabled">
+                    <div class="form-group">
+                        <label for="telegram-bot-token">Bot Token:</label>
+                        <input type="password" id="telegram-bot-token" placeholder="123456789:ABCdefGHI..." required>
+                        <small style="color: #666; margin-top: 5px; display: block;">Create a bot with <a href="https://t.me/BotFather" target="_blank">@BotFather</a> and paste the token here.</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="telegram-chat-id">Chat ID:</label>
+                        <input type="text" id="telegram-chat-id" placeholder="-1001234567890" required>
+                        <small style="color: #666; margin-top: 5px; display: block;">The chat, group, or channel ID to forward SMS messages to. Use <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a> to find your chat ID.</small>
+                    </div>
+
+                    <div class="button-group">
+                        <button type="button" class="test-btn" onclick="testTelegramConfig()">🧪 Test Telegram</button>
+                        <button type="button" class="save-btn" onclick="saveTelegramConfig()">💾 Save Telegram Config</button>
+                    </div>
+                </div>
+
+                <!-- Test Results -->
+                <div id="telegram-test-results" style="display: none; margin-top: 20px; padding: 15px; background: #f9f9f9; border-radius: 5px;">
+                    <h4 style="color: #333; margin-bottom: 10px;">Test Results:</h4>
+                    <div id="telegram-test-results-text" style="color: #666; font-family: monospace; white-space: pre-wrap; word-break: break-word;"></div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top: 30px;">
                 <h2>📝 SMS Logging</h2>
                 <div id="sms-logging-alert" class="alert"></div>
 
@@ -1325,6 +1370,16 @@
         // Show gatewayapi alert
         function showGatewayapiAlert(message, type) {
             const alert = document.getElementById('gatewayapi-alert');
+            alert.textContent = message;
+            alert.className = 'alert ' + type;
+            setTimeout(() => {
+                alert.className = 'alert';
+            }, 5000);
+        }
+
+        // Show telegram alert
+        function showTelegramAlert(message, type) {
+            const alert = document.getElementById('telegram-alert');
             alert.textContent = message;
             alert.className = 'alert ' + type;
             setTimeout(() => {
@@ -1663,6 +1718,139 @@
             });
         }
         
+        // ===== TELEGRAM FORWARDING FUNCTIONS =====
+
+        function updateTelegramUI() {
+            const toggle = document.getElementById('telegram-toggle');
+            const formWrapper = document.getElementById('telegram-form-wrapper');
+            const status = document.getElementById('telegram-status');
+
+            if (toggle.checked) {
+                formWrapper.classList.remove('form-disabled');
+                status.textContent = 'Enabled';
+                status.classList.remove('disabled');
+                status.classList.add('enabled');
+            } else {
+                formWrapper.classList.add('form-disabled');
+                status.textContent = 'Disabled';
+                status.classList.add('disabled');
+                status.classList.remove('enabled');
+            }
+        }
+
+        function autoSaveTelegram() {
+            updateTelegramUI();
+            saveTelegramConfig();
+        }
+
+        function saveTelegramConfig() {
+            const enabled = document.getElementById('telegram-toggle').checked;
+            const botToken = document.getElementById('telegram-bot-token').value.trim();
+            const chatId = document.getElementById('telegram-chat-id').value.trim();
+
+            if (enabled && (!botToken || !chatId)) {
+                showTelegramAlert('❌ Please fill in all required fields', 'error');
+                return;
+            }
+
+            const config = {
+                enabled: enabled,
+                bot_token: botToken,
+                chat_id: chatId
+            };
+
+            fetch('/api/telegram/save', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(config)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    showTelegramAlert('✅ Telegram configuration saved successfully!', 'success');
+                } else {
+                    showTelegramAlert(`❌ Error: ${data.message}`, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showTelegramAlert('❌ Error saving configuration', 'error');
+            });
+        }
+
+        function loadTelegramConfig() {
+            fetch('/api/telegram/config')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const config = data.config;
+                        const toggle = document.getElementById('telegram-toggle');
+                        toggle.checked = !!config.enabled;
+
+                        updateTelegramUI();
+
+                        document.getElementById('telegram-bot-token').value = config.bot_token || '';
+                        document.getElementById('telegram-chat-id').value = config.chat_id || '';
+                    }
+                })
+                .catch(error => console.error('Error loading telegram config:', error));
+        }
+
+        function testTelegramConfig() {
+            const botToken = document.getElementById('telegram-bot-token').value.trim();
+            const chatId = document.getElementById('telegram-chat-id').value.trim();
+
+            if (!botToken || !chatId) {
+                showTelegramAlert('❌ Please fill in all required fields', 'error');
+                return;
+            }
+
+            const config = {
+                bot_token: botToken,
+                chat_id: chatId
+            };
+
+            const testBtn = event.target;
+            testBtn.disabled = true;
+            testBtn.textContent = '🔄 Testing...';
+
+            fetch('/api/telegram/test', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(config)
+            })
+            .then(response => response.json())
+            .then(data => {
+                const resultsDiv = document.getElementById('telegram-test-results');
+                const resultsText = document.getElementById('telegram-test-results-text');
+                resultsDiv.style.display = 'block';
+
+                if (data.status === 'success') {
+                    resultsText.textContent = '✅ Test Message Sent Successfully!\n\n' + (data.message || 'Telegram forwarding is configured correctly.');
+                    resultsDiv.style.borderLeft = '4px solid #4caf50';
+                } else {
+                    resultsText.textContent = '❌ Test Failed\n\n' + (data.message || 'Check your Telegram Bot configuration.');
+                    resultsDiv.style.borderLeft = '4px solid #f44336';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                const resultsDiv = document.getElementById('telegram-test-results');
+                const resultsText = document.getElementById('telegram-test-results-text');
+                resultsDiv.style.display = 'block';
+                resultsDiv.style.borderLeft = '4px solid #f44336';
+                resultsText.textContent = '❌ Connection Error\n\n' + error.message;
+            })
+            .finally(() => {
+                testBtn.disabled = false;
+                testBtn.textContent = '🧪 Test Telegram';
+            });
+        }
+
         // ===== SMS LOGGING FUNCTIONS =====
 
         function updateSmsLoggingUI() {
@@ -1738,6 +1926,7 @@
         loadSignalStrength();
         loadForwardingConfig();
         loadGatewayapiConfig();
+        loadTelegramConfig();
         loadSmsLoggingConfig();
         
         // Refresh stats and messages every 5 seconds
